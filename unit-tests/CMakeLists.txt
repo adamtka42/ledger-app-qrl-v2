@@ -61,6 +61,12 @@ target_link_libraries(test_rlp_decode PUBLIC
                       gcov)
 
 add_test(test_rlp_decode test_rlp_decode)
+
+# streaming parser (tx_stream.c depends only on tx_types.h, no SDK headers)
+add_executable(test_tx_stream test_tx_stream.c)
+add_library(tx_stream ../src/tx_stream.c)
+target_link_libraries(test_tx_stream PUBLIC tx_stream cmocka gcov)
+add_test(test_tx_stream test_tx_stream)
 target_link_libraries(test_tx_format PUBLIC tx_format cmocka gcov)
 add_test(test_tx_format test_tx_format)
 
