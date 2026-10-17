@@ -161,7 +161,6 @@ The following standard Status Words are returned for all APDUs.
 |   B001   | SW_DISPLAY_BIP32_PATH_FAIL  | BIP32 path conversion to string failed                |
 |   B002   | SW_DISPLAY_ADDRESS_FAIL     | Address conversion to string failed                   |
 |   B003   | SW_DISPLAY_AMOUNT_FAIL      | Amount conversion to string failed                    |
-|   B004   | SW_WRONG_TX_LENGTH          | Wrong raw transaction length                          |
 |   B005   | SW_TX_PARSING_FAIL          | Failed to parse raw transaction                       |
 |   B006   | SW_TX_HASH_FAIL             | Failed to compute hash digest of raw transaction      |
 |   B007   | SW_BAD_STATE                | Security issue with bad state                         |
