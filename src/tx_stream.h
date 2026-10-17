@@ -21,7 +21,7 @@ void tx_stream_init(tx_stream_t *s, zond_tx_t *tx);
  * including inside an RLP header. Hashing of the raw bytes is the caller's job;
  * this module does not depend on the SDK.
  *
- * Validation matches decode_ledger_tx(): canonical RLP only (no leading zero in
+ * Validation rules: canonical RLP only (no leading zero in
  * a length, long form only for 56+ bytes, a lone byte below 0x80 encoded as
  * itself), no leading zero in integer fields, `data` must be a string and
  * `access_list` a list.

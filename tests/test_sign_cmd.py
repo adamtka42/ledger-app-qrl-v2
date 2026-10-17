@@ -130,35 +130,95 @@ def test_calldata_refused_when_blind_signing_disabled(backend: BackendInterface)
     assert exc.value.status == Errors.SW_DENY
 
 
-def test_oversized_tx_rejected_across_multiple_apdus(backend: BackendInterface) -> None:
-    """Stream a transaction larger than MAX_TRANSACTION_LEN (510 bytes).
+# --- streaming parser: the device no longer buffers the whole transaction -----
 
-    This is the only test that drives the multi-APDU reassembly path: at 600
-    bytes the client splits the payload into three chunks, so the P1=DATA_MORE
-    branch runs twice before the accumulated length guard in handler_sign_tx
-    trips. The guard fires during streaming, before any RLP parsing or UI, so
-    the payload does not need to be a well-formed transaction.
+# Fields of the preimage used in test_sign_tx_short_tx, so that a transaction
+# with arbitrary calldata can be built without a separate vector generator.
+_CHAIN_ID = bytes.fromhex("01")
+_NONCE = bytes.fromhex("03")
+_GAS_TIP_CAP = bytes.fromhex("77359400")
+_GAS_FEE_CAP = bytes.fromhex("0ba43b7400")
+_GAS = bytes.fromhex("61a8")
+_TO = bytes.fromhex("b94f5374fce5edbc8e2a8697c15331677e6ebf0b" + "aa" * 44)
+_VALUE = bytes.fromhex("016345785d8a0000")
+_DESCRIPTOR = bytes.fromhex("010000")
+_REFERENCE_PREIMAGE = bytes.fromhex("02f86201038477359400850ba43b74008261a8b840b94f5374fce5edbc8e2a8697c15331677e6ebf0baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88016345785d8a000080c08301000080")
+
+
+def _rlp_len(base: int, n: int) -> bytes:
+    if n < 56:
+        return bytes([base + n])
+    length = n.to_bytes((n.bit_length() + 7) // 8, "big")
+    return bytes([base + 55 + len(length)]) + length
+
+
+def _rlp_bytes(b: bytes) -> bytes:
+    if len(b) == 1 and b[0] < 0x80:
+        return b
+    return _rlp_len(0x80, len(b)) + b
+
+
+def build_preimage(data: bytes) -> bytes:
+    """0x02 || rlp([chain_id, nonce, tip, fee_cap, gas, to, value, data, [], descriptor, ""])"""
+    payload = b"".join(_rlp_bytes(f) for f in (_CHAIN_ID, _NONCE, _GAS_TIP_CAP, _GAS_FEE_CAP, _GAS, _TO, _VALUE, data))
+    payload += b"\xc0" + _rlp_bytes(_DESCRIPTOR) + b"\x80"
+    return b"\x02" + _rlp_len(0xc0, len(payload)) + payload
+
+
+def test_preimage_builder_matches_reference() -> None:
+    assert build_preimage(b"") == _REFERENCE_PREIMAGE
+
+
+def test_malformed_tx_rejected_while_streaming(backend: BackendInterface) -> None:
+    """600 bytes of garbage split by the client into three APDUs.
+
+    The streaming parser rejects the payload on the first chunk (0xaa is not
+    an RLP list header), before any later APDU, any UI and without a buffer
+    size limit: the former 510-byte limit and SW_WRONG_TX_LENGTH are gone.
     """
     client = BoilerplateCommandSender(backend)
     path = "m/44'/238'/0'/0/0"
-    transaction = bytes([0x02]) + b"\xaa" * 599  # 600 B > 510 B buffer
+    transaction = bytes([0x02]) + b"\xaa" * 599
     with pytest.raises(ExceptionRAPDU) as exc:
         with client.sign_tx(path=path, transaction=transaction):
             pass
-    assert exc.value.status == Errors.SW_WRONG_TX_LENGTH
+    assert exc.value.status == Errors.SW_TX_PARSING_FAIL
 
 
-def test_tx_at_max_length_is_parsed_not_length_rejected(backend: BackendInterface) -> None:
-    """A 510-byte payload must reach the parser rather than the length guard.
+def test_large_calldata_refused_when_blind_signing_disabled(backend: BackendInterface) -> None:
+    """A 3 kB calldata is streamed over 13 APDUs and decoded to the end.
 
-    Guards against an off-by-one that would reject transactions at exactly
-    MAX_TRANSACTION_LEN. The payload is deliberately not valid RLP, so the
-    expected outcome is a parsing failure - proving the length check passed.
+    Blind signing is off by default, so the device refuses once the whole
+    transaction has been parsed. Before the streaming parser the same payload
+    was rejected on the third APDU by the 510-byte buffer limit, so SW_DENY
+    here proves the limit is gone and the parser kept its position across
+    all chunks.
     """
     client = BoilerplateCommandSender(backend)
     path = "m/44'/238'/0'/0/0"
-    transaction = bytes([0x02]) + b"\xaa" * 509  # exactly 510 B
+    transaction = build_preimage(b"\xab" * 3000)
+    assert len(transaction) > 3000
     with pytest.raises(ExceptionRAPDU) as exc:
         with client.sign_tx(path=path, transaction=transaction):
+            pass
+    assert exc.value.status == Errors.SW_DENY
+
+
+def test_truncated_tx_rejected(backend: BackendInterface) -> None:
+    """The last APDU arrives before the outer RLP list is complete."""
+    client = BoilerplateCommandSender(backend)
+    path = "m/44'/238'/0'/0/0"
+    with pytest.raises(ExceptionRAPDU) as exc:
+        with client.sign_tx(path=path, transaction=_REFERENCE_PREIMAGE[:-1]):
+            pass
+    assert exc.value.status == Errors.SW_TX_PARSING_FAIL
+
+
+def test_trailing_bytes_rejected(backend: BackendInterface) -> None:
+    """Bytes after the end of the outer RLP list must not be signed."""
+    client = BoilerplateCommandSender(backend)
+    path = "m/44'/238'/0'/0/0"
+    with pytest.raises(ExceptionRAPDU) as exc:
+        with client.sign_tx(path=path, transaction=_REFERENCE_PREIMAGE + b"\x00"):
             pass
     assert exc.value.status == Errors.SW_TX_PARSING_FAIL

@@ -12,7 +12,7 @@
 // Unsigned QRL v2.0 type-2 sighash preimages (11 RLP fields), generated with
 // tests/e2e/qrltx.mjs. chain_id 3151908, nonce 1, tip 1 gwei, fee cap
 // 10 gwei, gas 500000, value 0.01, empty data/access_list, descriptor
-// 01 00 00, empty extra_params. Shared with test_rlp_decode.c.
+// 01 00 00, empty extra_params.
 static const char VALID_64B_TO[] =
     "02f8658330182401843b9aca008502540be4008307a120b8400838a121a6e4dd8a51e743"
     "7b152fabbc76a173f077132f2c2ed021c7b0991e70da4dba44e9ec00984a90f28dfb0aab"
@@ -242,7 +242,7 @@ static void test_contract_creation(void **state) {
     for (size_t ci = 0; ci < N_CHUNK_SIZES; ci++) {
         assert_int_equal(feed_hex(&c, VALID_CONTRACT_CREATION, CHUNK_SIZES[ci]),
                          TX_STREAM_FINISHED);
-        // empty `to` leaves the zero-filled buffer, as decode_ledger_tx() does
+        // empty `to` (contract creation) leaves the zero-filled buffer
         assert_memory_equal(c.tx.to, zeros, 64);
         assert_int_equal(c.tx.value_len, 7);
         assert_false(c.tx.has_data);
@@ -276,7 +276,7 @@ static void test_reject_oversized_nonce(void **state) {
     assert_int_equal(tx_stream_feed(&c.s, &c.tx, buf + 7, 1), TX_STREAM_ERROR);
 }
 
-// Same mutation as test_rlp_decode.c: nonce 0x01 encoded as 0x81 0x01.
+// nonce 0x01 encoded as 0x81 0x01 instead of the single byte 0x01.
 static void test_reject_noncanonical_single_byte(void **state) {
     (void) state;
     uint8_t buf[600];

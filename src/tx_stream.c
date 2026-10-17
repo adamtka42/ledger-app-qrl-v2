@@ -108,7 +108,7 @@ static bool rlp_header_decode(const uint8_t *hdr,
 
 /**
  * Validate the header of the field about to be received and switch the
- * parser to payload mode. Mirrors the per-field rules of decode_ledger_tx().
+ * parser to payload mode (per-field rules: doc/TRANSACTION.md).
  */
 static bool field_begin(tx_stream_t *s, zond_tx_t *tx, bool is_list, uint32_t len) {
     switch (s->field) {
