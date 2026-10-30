@@ -55,6 +55,14 @@ The address can be verified on the device before being returned.
 
 This command signs a QRL v2.0 transaction after having the user validate the transactions parameters.
 
+The signing session becomes active only after the first block's BIP32 path has
+been validated. Transaction data blocks (`P1=01` or `P1=02, P2=00`) are accepted
+only while that session is receiving data. If the signing handler rejects a
+path, transaction data, or command parameters, the session is discarded. The
+host must send a new first block before retrying; continuing a discarded session
+returns `SW_BAD_STATE` (`B007`). A new first block also replaces any previous
+signing session, including when the new path is empty or malformed.
+
 The input data is the RLP encoded transaction streamed to the device in 255 bytes maximum data chunks. The device parses and hashes the transaction incrementally as the chunks arrive, so there is no fixed maximum transaction size (only a 64 KiB sanity cap applies).
 
 As the signature size exceeds maximum APDU response length, responses will be chunked with max size of 258 bytes each. The main app should request each chunk manually with index from 0-17, where the first chunk will be automatically returned after the last transaction data is sent and the signature is computed.
