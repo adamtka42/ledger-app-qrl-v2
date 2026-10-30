@@ -7,6 +7,7 @@ from ragger.backend.interface import BackendInterface
 from ragger.error import ExceptionRAPDU
 from ragger.navigator import Navigator, NavIns, NavInsID
 from ragger.navigator.navigation_scenario import NavigateWithScenario
+from ragger.bip import pack_derivation_path
 
 from application_client.boilerplate_command_sender import (
     BoilerplateCommandSender, CLA, InsType, Errors, MAX_APDU_LEN,
@@ -289,3 +290,103 @@ def test_trailing_bytes_rejected(backend: BackendInterface) -> None:
         with client.sign_tx(path=path, transaction=_REFERENCE_PREIMAGE + b"\x00"):
             pass
     assert exc.value.status == Errors.SW_TX_PARSING_FAIL
+
+
+@pytest.mark.parametrize("path", [
+    "m/44'/238'/0/0/0",
+    "m/44'/238'/0'/0'/0",
+    "m/44'/238'/0'/0/0'",
+    "m/44'/238'/0'/0",
+])
+@pytest.mark.parametrize("p1", [0x01, 0x02], ids=["more", "last"])
+def test_rejected_sign_path_cannot_continue(backend: BackendInterface, path: str, p1: int) -> None:
+    with pytest.raises(ExceptionRAPDU) as exc:
+        backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=0, p2=0,
+                         data=pack_derivation_path(path))
+    assert exc.value.status == Errors.SW_WRONG_DATA_LENGTH
+
+    # One type byte exercises both continuation commands without entering UI
+    # even on the vulnerable implementation.
+    with pytest.raises(ExceptionRAPDU) as exc:
+        backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=p1, p2=0,
+                         data=_REFERENCE_PREIMAGE[:1])
+    assert exc.value.status == Errors.SW_BAD_STATE
+    assert not exc.value.data
+
+
+@pytest.mark.parametrize("bad_start", [
+    b"",
+    b"\x00",
+    pack_derivation_path("m/44'/238'/0'/0/0")[:-1],
+], ids=["empty", "zero_path_length", "truncated_path"])
+@pytest.mark.parametrize("p1", [0x01, 0x02], ids=["more", "last"])
+def test_failed_sign_start_invalidates_previous_session(
+    backend: BackendInterface, bad_start: bytes, p1: int
+) -> None:
+    backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=0, p2=0,
+                     data=pack_derivation_path("m/44'/238'/0'/0/0"))
+    backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=1, p2=0,
+                     data=_REFERENCE_PREIMAGE[:10])
+
+    with pytest.raises(ExceptionRAPDU) as exc:
+        backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=0, p2=0, data=bad_start)
+    assert exc.value.status == Errors.SW_WRONG_DATA_LENGTH
+
+    with pytest.raises(ExceptionRAPDU) as exc:
+        backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=p1, p2=0,
+                         data=_REFERENCE_PREIMAGE[:1])
+    assert exc.value.status == Errors.SW_BAD_STATE
+    assert not exc.value.data
+
+
+@pytest.mark.parametrize("bad_p1,bad_p2,transaction,status", [
+    (0x01, 0, b"\x03", Errors.SW_TX_PARSING_FAIL),
+    (0x02, 0, _REFERENCE_PREIMAGE[:-1], Errors.SW_TX_PARSING_FAIL),
+    (0x01, 0, _REFERENCE_PREIMAGE, Errors.SW_TX_PARSING_FAIL),
+    (0x02, 0, build_preimage(b"\x00"), Errors.SW_DENY),
+    (0x01, 0, b"", Errors.SW_WRONG_DATA_LENGTH),
+    (0x02, 0, b"", Errors.SW_WRONG_DATA_LENGTH),
+    (0x03, 0, b"\x02", Errors.SW_WRONG_P1P2),
+    (0x01, 18, b"\x02", Errors.SW_WRONG_P1P2),
+], ids=["malformed", "truncated", "finished_before_last", "blind_signing_disabled",
+        "empty_more", "empty_last", "invalid_p1", "invalid_p2"])
+@pytest.mark.parametrize("p1", [0x01, 0x02], ids=["more", "last"])
+def test_failed_sign_stream_cannot_continue(
+    backend: BackendInterface, bad_p1: int, bad_p2: int, transaction: bytes, status: Errors, p1: int
+) -> None:
+    backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=0, p2=0,
+                     data=pack_derivation_path("m/44'/238'/0'/0/0"))
+    with pytest.raises(ExceptionRAPDU) as exc:
+        backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=bad_p1, p2=bad_p2, data=transaction)
+    assert exc.value.status == status
+
+    with pytest.raises(ExceptionRAPDU) as exc:
+        backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=p1, p2=0,
+                         data=_REFERENCE_PREIMAGE[:1])
+    assert exc.value.status == Errors.SW_BAD_STATE
+    assert not exc.value.data
+
+
+def test_valid_sign_session_after_rejected_path(
+    backend: BackendInterface, scenario_navigator: NavigateWithScenario
+) -> None:
+    client = BoilerplateCommandSender(backend)
+    path = "m/44'/238'/0'/0/0"
+    client.get_public_key(path=path)
+    public_key = get_public_key_chunks(backend)
+
+    with pytest.raises(ExceptionRAPDU) as exc:
+        backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=0, p2=0,
+                         data=pack_derivation_path("m/44'/238'/0/0/0"))
+    assert exc.value.status == Errors.SW_WRONG_DATA_LENGTH
+
+    backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=0, p2=0, data=pack_derivation_path(path))
+    backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=1, p2=0, data=_REFERENCE_PREIMAGE[:1])
+    with backend.exchange_async(cla=CLA, ins=InsType.SIGN_TX, p1=2, p2=0,
+                                data=_REFERENCE_PREIMAGE[1:]):
+        scenario_navigator.review_approve(do_comparison=False)
+
+    signature = get_signature_chunks(backend, client.get_async_response().data)
+    assert len(signature) == SIG_LEN
+    sighash = keccak.new(digest_bits=256, data=_REFERENCE_PREIMAGE).digest()
+    assert ML_DSA_87.verify(public_key, sighash, signature, ctx=SIGNING_CONTEXT)
