@@ -189,6 +189,7 @@ ErrorCode poly_uniform_eta(Poly *a, uint8_t (*seed)[CRH_BYTES], uint16_t nonce) 
         ctr += rej_eta(a->coeffs + ctr, N - ctr, buf, STREAM_256_BLOCK_BYTES);
     }
     shake256_clear(&ctx);
+    explicit_bzero(buf, sizeof(buf));
     return 0;
 }
 
@@ -202,6 +203,8 @@ void poly_uniform_gamma1(Poly *a, uint8_t seed[CRH_BYTES], uint16_t nonce) {
     shake256_finalize(&ctx);
     shake256_squeeze(&ctx, buf, POLY_UNIFORM_GAMMA1_N_BLOCKS * STREAM_256_BLOCK_BYTES);
     poly_z_unpack(a, buf);
+    shake256_clear(&ctx);
+    explicit_bzero(buf, sizeof(buf));
 }
 
 ErrorCode poly_challenge(Poly *c, uint8_t seed[], size_t seed_len) {

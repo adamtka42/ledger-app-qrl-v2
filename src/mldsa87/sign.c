@@ -10,6 +10,7 @@
 #include "os_pic.h"
 #include "globals.h"
 #include "os.h"
+#include "os_random.h"
 #include <inttypes.h>
 
 typedef union {
@@ -22,6 +23,11 @@ u_temp_poly_buffer_squeeze ubuf;
 /* Kept separate from ubuf: gamma1 unpacking needs the sampled polynomial and
  * the SHAKE output live at the same time. */
 static uint8_t gamma1_buffer[POLY_UNIFORM_GAMMA1_N_BLOCKS * STREAM_256_BLOCK_BYTES];
+
+static void wipe_ram_scratch(void) {
+    explicit_bzero(&ubuf, sizeof(ubuf));
+    explicit_bzero(gamma1_buffer, sizeof(gamma1_buffer));
+}
 
 /* Squeeze into RAM, then a single NVM write. Callers pass outlen <= the size of
  * ubuf.buf_squeeze; the only current caller writes CTILDE_BYTES to N_storage.sig,
@@ -132,6 +138,8 @@ static void combined_method(volatile PolyVecK *t1,
         }
         // nvm_write((void*)&t1->vec[i], &ubuf.temp_poly, sizeof(Poly));
     }
+    explicit_bzero(&t_poly, sizeof(t_poly));
+    explicit_bzero(poly_buffer, sizeof(poly_buffer));
 }
 
 typedef union {
@@ -336,6 +344,7 @@ static void pack_pk_volatile(uint8_t rho[SEED_BYTES], volatile PolyVecK *t1) {
 }
 
 ErrorCode crypto_sign_keypair(uint8_t (*seed)[SEED_BYTES]) {
+    uint8_t seed_new[SEED_BYTES] = {0};
     uint8_t rho[SEED_BYTES] = {0};
     uint8_t key[SEED_BYTES] = {0};
     uint8_t rhoPrime[CRH_BYTES] = {0};
@@ -346,14 +355,17 @@ ErrorCode crypto_sign_keypair(uint8_t (*seed)[SEED_BYTES]) {
     explicit_bzero(&s1, sizeof(s1));
     PolyVecK s2;
     explicit_bzero(&s2, sizeof(s2));
+    shake256_ctx ctx;
+    int err = ERR_NONE;
 
     if (seed == NULL) {
-        uint8_t seed_new[SEED_BYTES] = {0};
-        cx_rng(seed_new, SEED_BYTES);
+        if (cx_get_random_bytes(seed_new, sizeof(seed_new)) != CX_OK) {
+            err = ERR_FAILED_GENERATE_RANDOM_SEED;
+            goto cleanup;
+        }
         seed = &seed_new;
     }
     /* Expand 32 bytes of randomness into rho, rhoprime and key */
-    shake256_ctx ctx;
     shake256_init(&ctx);
     shake256_absorb(&ctx, *seed, SEED_BYTES);
     uint8_t extraData[2] = {K, L};
@@ -364,15 +376,14 @@ ErrorCode crypto_sign_keypair(uint8_t (*seed)[SEED_BYTES]) {
     shake256_squeeze(&ctx, key, SEED_BYTES);
     shake256_clear(&ctx);
 
-    int err = 0;
     /* Sample short vectors s1 and s2 */
     err = poly_vec_l_uniform_eta(&s1, &rhoPrime, 0);
     if (err != 0) {
-        return err;
+        goto cleanup;
     }
     err = poly_vec_k_uniform_eta(&s2, &rhoPrime, L);
     if (err != 0) {
-        return err;
+        goto cleanup;
     }
     /* Matrix-vector multiplication */
     // u.s1hat = s1;
@@ -389,7 +400,15 @@ ErrorCode crypto_sign_keypair(uint8_t (*seed)[SEED_BYTES]) {
     poly_vec_k_power2_round_volatile_keypair(&N_storage.t1, &N_storage.t1);
     pack_pk_volatile(rho, &N_storage.t1);
 
-    return 0;
+cleanup:
+    explicit_bzero(seed_new, sizeof(seed_new));
+    explicit_bzero(key, sizeof(key));
+    explicit_bzero(rhoPrime, sizeof(rhoPrime));
+    explicit_bzero(&s1, sizeof(s1));
+    explicit_bzero(&s2, sizeof(s2));
+    shake256_clear(&ctx);
+    wipe_ram_scratch();
+    return err;
 }
 
 static void poly_vec_l_uniform_gamma1_volatile(volatile PolyVecL *v,
@@ -881,12 +900,20 @@ ErrorCode crypto_sign_optimized(const uint32_t bip32_path[],
 
     // Message sign prepare
     uint8_t raw_seed[64] = {0};
+    uint8_t seed[32] = {0};
+    uint8_t rnd[RND_BYTES] = {0};
+    uint8_t key[SEED_BYTES] = {0};
+    uint8_t rhoPrime[CRH_BYTES] = {0};
+    uint8_t mu[CRH_BYTES] = {0};
+    u_s2_s1hat u;
+    PolyVecL s1;
+    shake256_ctx ctx;
     cx_err_t err =
         os_derive_bip32_no_throw(CX_CURVE_SECP256K1, bip32_path, bip32_path_len, raw_seed, NULL);
     if (err != 0) {
-        return -1;
+        err = (cx_err_t) -1;
+        goto cleanup;
     }
-    uint8_t seed[32] = {0};
     for (int i = 0; i < 32; i++) {
         seed[i] = raw_seed[i];
     }
@@ -898,8 +925,11 @@ ErrorCode crypto_sign_optimized(const uint32_t bip32_path[],
     // }
     // // PRINTF("\n");
 
-    uint8_t rnd[RND_BYTES] = {0};
-    cx_rng(rnd, RND_BYTES);  // hedged signing (FIPS 204 default)
+    // Hedged signing: entropy failure must also take the cleanup path.
+    if (cx_get_random_bytes(rnd, sizeof(rnd)) != CX_OK) {
+        err = ERR_FAILED_GENERATE_RANDOM_SEED;
+        goto cleanup;
+    }
     uint8_t pre[CTX_LEN + 2] = {0};
     pre[0] = 0;
     pre[1] = (uint8_t) CTX_LEN;
@@ -910,15 +940,7 @@ ErrorCode crypto_sign_optimized(const uint32_t bip32_path[],
     // From keypair method
     uint8_t tr[TR_BYTES] = {0};
     uint8_t rho[SEED_BYTES] = {0};
-    uint8_t key[SEED_BYTES] = {0};
-    uint8_t rhoPrime[CRH_BYTES] = {0};
-
-    u_s2_s1hat u;
-    PolyVecL s1;
-    // PolyVecK s2;
-
     /* Expand 32 bytes of randomness into rho, rhoprime and key */
-    shake256_ctx ctx;
     shake256_init(&ctx);
     shake256_absorb(&ctx, seed, SEED_BYTES);
     uint8_t extraData[2] = {K, L};
@@ -932,7 +954,7 @@ ErrorCode crypto_sign_optimized(const uint32_t bip32_path[],
     /* Sample short vectors s1 and s2 */
     err = poly_vec_l_uniform_eta(&s1, &rhoPrime, 0);
     if (err != 0) {
-        return err;
+        goto cleanup;
     }
     /* Matrix-vector multiplication */
     u.s1hat = s1;
@@ -945,7 +967,7 @@ ErrorCode crypto_sign_optimized(const uint32_t bip32_path[],
     /* Add noise vector s2 */
     err = poly_vec_k_uniform_eta(&u.s2, &rhoPrime, L);
     if (err != 0) {
-        return err;
+        goto cleanup;
     }
     poly_vec_k_add_volatile(&N_storage.t1, &u.s2);
 
@@ -961,7 +983,6 @@ ErrorCode crypto_sign_optimized(const uint32_t bip32_path[],
     shake256_clear(&ctx);
 
     // From signing method
-    uint8_t mu[CRH_BYTES] = {0};
     explicit_bzero(rhoPrime, CRH_BYTES);
 
     uint16_t nonce = 0;
@@ -991,14 +1012,8 @@ ErrorCode crypto_sign_optimized(const uint32_t bip32_path[],
     poly_vec_k_ntt_volatile(&N_storage.pack1.t0);
 rej:
     if (attempts >= 814) {
-        explicit_bzero(seed, sizeof(seed));
-        explicit_bzero(rnd, sizeof(rnd));
-        explicit_bzero(key, sizeof(key));
-        explicit_bzero(rhoPrime, sizeof(rhoPrime));
-        explicit_bzero(mu, sizeof(mu));
-        explicit_bzero(&s1, sizeof(s1));
-        explicit_bzero(&u, sizeof(u));
-        return ERR_INVALID_SIGNATURE;
+        err = ERR_INVALID_SIGNATURE;
+        goto cleanup;
     }
     attempts++;
     /* Sample intermediate vector y */
@@ -1074,10 +1089,18 @@ rej:
         c[i] = N_storage.sig[i];
     }
     err = pack_sig_volatile(N_storage.sig, CRYPTO_BYTES, c, &N_storage.z, &N_storage.h);
-    if (err != 0) {
-        return err;
-    }
-    return 0;
+cleanup:
+    explicit_bzero(raw_seed, sizeof(raw_seed));
+    explicit_bzero(seed, sizeof(seed));
+    explicit_bzero(rnd, sizeof(rnd));
+    explicit_bzero(key, sizeof(key));
+    explicit_bzero(rhoPrime, sizeof(rhoPrime));
+    explicit_bzero(mu, sizeof(mu));
+    explicit_bzero(&s1, sizeof(s1));
+    explicit_bzero(&u, sizeof(u));
+    shake256_clear(&ctx);
+    wipe_ram_scratch();
+    return err;
 }
 
 static int32_t unpack_sig_volatile(uint8_t (*c)[CTILDE_BYTES],
@@ -1227,6 +1250,7 @@ ErrorCode crypto_verify_optimized(const uint32_t bip32_path[],
                                   size_t message_len,
                                   bool *is_verified) {
     // Data validation
+    *is_verified = false;
     if (sig == NULL || sig_len == 0) {
         *is_verified = false;
         return ERR_INVALID_SIGNATURE;
@@ -1246,13 +1270,18 @@ ErrorCode crypto_verify_optimized(const uint32_t bip32_path[],
 
     // Message verify prepare
     uint8_t raw_seed[64] = {0};
+    uint8_t seed[32] = {0};
+    uint8_t key[SEED_BYTES] = {0};
+    uint8_t rhoPrime[CRH_BYTES] = {0};
+    PolyVecL s1;
+    union_s2_t0 u;
+    shake256_ctx ctx;
     cx_err_t err =
         os_derive_bip32_no_throw(CX_CURVE_SECP256K1, bip32_path, bip32_path_len, raw_seed, NULL);
     if (err != 0) {
-        *is_verified = false;
-        return -1;
+        err = (cx_err_t) -1;
+        goto cleanup;
     }
-    uint8_t seed[32] = {0};
     for (int i = 0; i < 32; i++) {
         seed[i] = raw_seed[i];
     }
@@ -1267,14 +1296,7 @@ ErrorCode crypto_verify_optimized(const uint32_t bip32_path[],
 
     // From keypair method
     uint8_t rho[SEED_BYTES] = {0};
-    uint8_t key[SEED_BYTES] = {0};
-    uint8_t rhoPrime[CRH_BYTES] = {0};
-
-    PolyVecL s1;
-    union_s2_t0 u;
-
     /* Expand 32 bytes of randomness into rho, rhoprime and key */
-    shake256_ctx ctx;
     shake256_init(&ctx);
     shake256_absorb(&ctx, seed, SEED_BYTES);
     uint8_t extraData[2] = {K, L};
@@ -1288,11 +1310,11 @@ ErrorCode crypto_verify_optimized(const uint32_t bip32_path[],
     /* Sample short vectors s1 and s2 */
     err = poly_vec_l_uniform_eta(&s1, &rhoPrime, 0);
     if (err != 0) {
-        return err;
+        goto cleanup;
     }
     err = poly_vec_k_uniform_eta(&u.s2, &rhoPrime, L);
     if (err != 0) {
-        return err;
+        goto cleanup;
     }
 
     /* Matrix-vector multiplication */
@@ -1315,13 +1337,11 @@ ErrorCode crypto_verify_optimized(const uint32_t bip32_path[],
     uint8_t c2[CTILDE_BYTES] = {0};
 
     if (unpack_sig_volatile(&c, &N_storage.z, &N_storage.h, sig) != 0) {
-        *is_verified = false;
-        return 0;
+        goto cleanup;
     }
 
     if (poly_vec_l_chk_norm(&N_storage.z, GAMMA1 - BETA) != 0) {
-        *is_verified = false;
-        return 0;
+        goto cleanup;
     }
 
     /* Compute CRH(H(rho, t1), pre, msg) */
@@ -1343,8 +1363,7 @@ ErrorCode crypto_verify_optimized(const uint32_t bip32_path[],
     /* Matrix-vector multiplication; compute Az - c2^dt1 */
     err = poly_challenge_volatile(&N_storage.cp, c, CTILDE_BYTES);
     if (err != 0) {
-        *is_verified = false;
-        return err;
+        goto cleanup;
     }
 
     poly_vec_l_ntt_volatile(&N_storage.z);
@@ -1376,13 +1395,21 @@ ErrorCode crypto_verify_optimized(const uint32_t bip32_path[],
 
     for (int i = 0; i < CTILDE_BYTES; i++) {
         if (c[i] != c2[i]) {
-            *is_verified = false;
-            return ERR_NONE;
+            goto cleanup;
         }
     }
 
     *is_verified = true;
-    return ERR_NONE;
+cleanup:
+    explicit_bzero(raw_seed, sizeof(raw_seed));
+    explicit_bzero(seed, sizeof(seed));
+    explicit_bzero(key, sizeof(key));
+    explicit_bzero(rhoPrime, sizeof(rhoPrime));
+    explicit_bzero(&s1, sizeof(s1));
+    explicit_bzero(&u, sizeof(u));
+    shake256_clear(&ctx);
+    wipe_ram_scratch();
+    return err;
 }
 
 static void nvm_zero(volatile void *dst, size_t len) {

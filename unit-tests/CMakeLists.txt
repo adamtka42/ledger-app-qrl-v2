@@ -65,3 +65,26 @@ add_executable(test_tx_stream test_tx_stream.c)
 add_library(tx_stream ../src/tx_stream.c)
 target_link_libraries(test_tx_stream PUBLIC tx_stream cmocka gcov)
 add_test(test_tx_stream test_tx_stream)
+
+# Exercise real crypto code with mocked Ledger syscalls and observed erasure.
+add_executable(test_crypto_cleanup
+    test_crypto_cleanup.c
+    ../src/address.c
+    ../src/mldsa87/mldsa87.c
+    ../src/mldsa87/sign.c
+    ../src/mldsa87/poly.c
+    ../src/mldsa87/polyvec.c
+    ../src/mldsa87/ntt.c
+    ../src/mldsa87/reduce.c
+    ../src/mldsa87/rounding.c
+    ../src/mldsa87/constant.c
+    ../src/mldsa87/utils.c
+    ../src/mldsa87/keccakf.c
+    ../src/mldsa87/shake128.c
+    ../src/mldsa87/shake256.c)
+target_include_directories(test_crypto_cleanup BEFORE PRIVATE mocks)
+target_compile_definitions(test_crypto_cleanup PRIVATE explicit_bzero=test_explicit_bzero)
+set_property(TARGET test_crypto_cleanup APPEND_STRING PROPERTY LINK_FLAGS
+    " -Wl,--wrap=shake256_absorb,--wrap=shake256_squeeze,--wrap=poly_vec_l_uniform_eta,--wrap=poly_vec_k_uniform_eta,--wrap=poly_vec_l_chk_norm")
+target_link_libraries(test_crypto_cleanup PRIVATE cmocka gcov)
+add_test(test_crypto_cleanup test_crypto_cleanup)

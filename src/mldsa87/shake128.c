@@ -39,5 +39,5 @@ void shake128_squeeze(shake128_ctx *ctx, uint8_t *out, size_t outlen) {
 }
 
 void shake128_clear(shake128_ctx *ctx) {
-    MEMSET(ctx, 0, sizeof(*ctx));
+    explicit_bzero(ctx, sizeof(*ctx));
 }
