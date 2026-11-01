@@ -142,6 +142,7 @@ void poly_vec_l_pointwise_acc_montgomery(Poly *w, PolyVecL *u, PolyVecL *v) {
         poly_pointwise_montgomery(&t, &u->vec[i], &v->vec[i]);
         poly_add(w, w, &t);
     }
+    explicit_bzero(&t, sizeof(t));
 }
 
 void poly_vec_matrix_pointwise_montgomery(PolyVecK *t, PolyVecL (*mat)[K], PolyVecL *v) {
