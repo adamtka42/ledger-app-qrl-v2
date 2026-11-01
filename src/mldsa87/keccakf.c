@@ -1,4 +1,5 @@
 #include "keccakf.h"
+#include <string.h>
 
 // Rotate left 64-bit.
 // r[0] is 0, so the shift count must be masked: evaluating x >> 64 directly is
@@ -19,8 +20,8 @@ void keccakf(uint64_t s[25]) {
         0x8000000080008081ULL, 0x8000000000008080ULL, 0x0000000080000001ULL, 0x8000000080008008ULL};
     const int r[25] = {0,  1,  62, 28, 27, 36, 44, 6,  55, 20, 3,  10, 43,
                        25, 39, 41, 45, 15, 21, 8,  18, 2,  61, 56, 14};
+    uint64_t C[5], D[5], B[25];
     for (int round = 0; round < 24; round++) {
-        uint64_t C[5], D[5], B[25];
         for (int x = 0; x < 5; x++) C[x] = s[x] ^ s[x + 5] ^ s[x + 10] ^ s[x + 15] ^ s[x + 20];
         for (int x = 0; x < 5; x++) D[x] = C[(x + 4) % 5] ^ rol64(C[(x + 1) % 5], 1);
         for (int i = 0; i < 25; i++) s[i] ^= D[i % 5];
@@ -32,4 +33,7 @@ void keccakf(uint64_t s[25]) {
             s[i] = B[i] ^ ((~B[(i + 1) % 5 + 5 * (i / 5)]) & B[(i + 2) % 5 + 5 * (i / 5)]);
         s[0] ^= RC[round];
     }
+    explicit_bzero(C, sizeof(C));
+    explicit_bzero(D, sizeof(D));
+    explicit_bzero(B, sizeof(B));
 }
