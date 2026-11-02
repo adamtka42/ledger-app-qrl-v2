@@ -163,9 +163,9 @@ def _rlp_bytes(b: bytes) -> bytes:
     return _rlp_len(0x80, len(b)) + b
 
 
-def build_preimage(data: bytes, access_list: bytes = b"\xc0") -> bytes:
+def build_preimage(data: bytes, access_list: bytes = b"\xc0", to: bytes = _TO) -> bytes:
     """Build the 11-field preimage; access_list is an already RLP-encoded list."""
-    payload = b"".join(_rlp_bytes(f) for f in (_CHAIN_ID, _NONCE, _GAS_TIP_CAP, _GAS_FEE_CAP, _GAS, _TO, _VALUE, data))
+    payload = b"".join(_rlp_bytes(f) for f in (_CHAIN_ID, _NONCE, _GAS_TIP_CAP, _GAS_FEE_CAP, _GAS, to, _VALUE, data))
     payload += access_list + _rlp_bytes(_DESCRIPTOR) + b"\x80"
     return b"\x02" + _rlp_len(0xc0, len(payload)) + payload
 
@@ -189,6 +189,49 @@ def enable_blind_signing(device: Device, navigator: Navigator) -> None:
             ],
             screen_change_before_first_instruction=False,
         )
+
+
+@pytest.mark.parametrize("recipient,data", [
+    pytest.param(b"", b"", id="contract_creation"),
+    pytest.param(bytes(64), b"", id="zero_address"),
+    pytest.param(b"", bytes.fromhex("60006000f3"), id="contract_creation_with_bytecode"),
+])
+def test_sign_tx_recipient(backend: BackendInterface,
+                           request: pytest.FixtureRequest,
+                           device: Device,
+                           navigator: Navigator,
+                           scenario_navigator: NavigateWithScenario,
+                           recipient: bytes,
+                           data: bytes) -> None:
+    """Compare the recipient review screens and verify the exact signed preimage."""
+    client = BoilerplateCommandSender(backend)
+    path = "m/44'/238'/0'/0/0"
+    review_name = f"{request.node.originalname}_{request.node.callspec.id}"
+    if data:
+        enable_blind_signing(device, navigator)
+    client.get_public_key(path=path)
+    public_key = get_public_key_chunks(backend)
+    transaction = build_preimage(data, to=recipient)
+
+    with client.sign_tx(path=path, transaction=transaction):
+        if data:
+            scenario_navigator.review_approve_with_warning(test_name=review_name)
+        else:
+            scenario_navigator.review_approve(test_name=review_name)
+
+    signature = get_signature_chunks(backend, client.get_async_response().data)
+    assert len(signature) == SIG_LEN
+    sighash = keccak.new(digest_bits=256, data=transaction).digest()
+    assert ML_DSA_87.verify(public_key, sighash, signature, ctx=SIGNING_CONTEXT)
+
+
+def test_contract_creation_bytecode_refused_when_blind_signing_disabled(backend: BackendInterface) -> None:
+    client = BoilerplateCommandSender(backend)
+    transaction = build_preimage(bytes.fromhex("60006000f3"), to=b"")
+    with pytest.raises(ExceptionRAPDU) as exc:
+        with client.sign_tx(path="m/44'/238'/0'/0/0", transaction=transaction):
+            pass
+    assert exc.value.status == Errors.SW_DENY
 
 
 @pytest.mark.parametrize("payload_field", ["calldata", "access_list"])

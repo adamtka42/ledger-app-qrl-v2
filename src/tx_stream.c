@@ -227,7 +227,6 @@ static bool field_end(tx_stream_t *s, zond_tx_t *tx) {
 
     switch (s->field) {
         case TX_F_LIST:
-        case TX_F_TO:
         case TX_F_DATA:
         case TX_F_ACCESS_LIST:
             break;
@@ -245,6 +244,9 @@ static bool field_end(tx_stream_t *s, zond_tx_t *tx) {
             break;
         case TX_F_GAS:
             tx->gas_len = len8;
+            break;
+        case TX_F_TO:
+            tx->to_len = len8;
             break;
         case TX_F_VALUE:
             tx->value_len = len8;
