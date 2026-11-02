@@ -35,6 +35,7 @@ typedef struct {
     uint8_t gas_len;
 
     uint8_t to[ADDRESS_LENGTH];
+    uint8_t to_len;  /// 0 for contract creation, ADDRESS_LENGTH for a recipient
 
     uint8_t value[MAX_FIELD_SIZE];
     uint8_t value_len;

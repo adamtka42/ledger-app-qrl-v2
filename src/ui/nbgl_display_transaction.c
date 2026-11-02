@@ -96,7 +96,7 @@ void print_tx_utils(zond_tx_t *tx) {
     PRINTF("\n");
 
     PRINTF("To: 0x");
-    for (int i = 0; i < ADDRESS_LENGTH; i++) PRINTF("%02x", tx->to[i]);
+    for (int i = 0; i < tx->to_len; i++) PRINTF("%02x", tx->to[i]);
     PRINTF("\n");
 
     PRINTF("Value: 0x");
@@ -115,6 +115,7 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         G_context.state = STATE_NONE;
         return io_send_sw(SW_BAD_STATE);
     }
+    const bool is_contract_creation = (tx->to_len == 0);
 
     print_tx_utils(tx);
 
@@ -146,9 +147,10 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     memset(g_amount, 0, sizeof(g_amount));
     snprintf(g_amount, sizeof(g_amount), "QRL %s", amount);
 
-    // Format to address
+    // An empty recipient creates a contract; it is not the zero address.
     memset(g_to_address, 0, sizeof(g_to_address));
-    if (!format_checksummed_address(tx->to, g_to_address, sizeof(g_to_address))) {
+    if (!is_contract_creation &&
+        !format_checksummed_address(tx->to, g_to_address, sizeof(g_to_address))) {
         return io_send_sw(SW_DISPLAY_ADDRESS_FAIL);
     }
     PRINTF("to %s\n", g_to_address);
@@ -184,7 +186,11 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     } while (0)
     ADD_PAIR("From", g_from_address);
     ADD_PAIR("Amount", g_amount);
-    ADD_PAIR("To", g_to_address);
+    if (is_contract_creation) {
+        ADD_PAIR("Operation", "Create contract");
+    } else {
+        ADD_PAIR("To", g_to_address);
+    }
     ADD_PAIR("Chain ID", g_chain_id);
     ADD_PAIR("Gas limit", g_gas_limit);
     ADD_PAIR("Priority fee / gas", g_gas_tip_cap);
