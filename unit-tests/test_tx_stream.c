@@ -223,6 +223,7 @@ static void test_valid_64byte_recipient_all_chunk_sizes(void **state) {
         assert_int_equal(c.tx.gas_len, 3);
         assert_int_equal(c.tx.gas[0], 0x07);
         assert_memory_equal(c.tx.to, TO_64B, 64);
+        assert_int_equal(c.tx.to_len, ADDRESS_LENGTH);
         assert_int_equal(c.tx.value_len, 7);
         assert_memory_equal(c.tx.value, VALUE_0_01, 7);
         assert_false(c.tx.has_data);
@@ -242,10 +243,56 @@ static void test_contract_creation(void **state) {
     for (size_t ci = 0; ci < N_CHUNK_SIZES; ci++) {
         assert_int_equal(feed_hex(&c, VALID_CONTRACT_CREATION, CHUNK_SIZES[ci]),
                          TX_STREAM_FINISHED);
-        // empty `to` (contract creation) leaves the zero-filled buffer
+        // The empty recipient is retained separately from the zero-filled buffer.
+        assert_int_equal(c.tx.to_len, 0);
         assert_memory_equal(c.tx.to, zeros, 64);
         assert_int_equal(c.tx.value_len, 7);
         assert_false(c.tx.has_data);
+    }
+}
+
+static void test_contract_creation_differs_from_zero_address(void **state) {
+    (void) state;
+    ctx_t creation;
+    ctx_t transfer;
+    const uint8_t zeros[ADDRESS_LENGTH] = {0};
+    const uint8_t bytecode[] = {0x60, 0x00, 0x60, 0x00, 0xf3};
+    const size_t data_lengths[] = {0, sizeof(bytecode)};
+
+    for (size_t di = 0; di < sizeof(data_lengths) / sizeof(data_lengths[0]); di++) {
+        for (size_t ci = 0; ci < N_CHUNK_SIZES; ci++) {
+            size_t n = build_tx(g_tx,
+                                sizeof(g_tx),
+                                NULL,
+                                0,
+                                VALUE_0_01,
+                                sizeof(VALUE_0_01),
+                                bytecode,
+                                data_lengths[di],
+                                NULL,
+                                0);
+            tx_stream_init(&creation.s, &creation.tx);
+            assert_int_equal(feed_chunked(&creation, g_tx, n, CHUNK_SIZES[ci]), TX_STREAM_FINISHED);
+
+            n = build_tx(g_tx,
+                         sizeof(g_tx),
+                         zeros,
+                         sizeof(zeros),
+                         VALUE_0_01,
+                         sizeof(VALUE_0_01),
+                         bytecode,
+                         data_lengths[di],
+                         NULL,
+                         0);
+            tx_stream_init(&transfer.s, &transfer.tx);
+            assert_int_equal(feed_chunked(&transfer, g_tx, n, CHUNK_SIZES[ci]), TX_STREAM_FINISHED);
+
+            assert_memory_equal(creation.tx.to, transfer.tx.to, sizeof(zeros));
+            assert_int_equal(creation.tx.to_len, 0);
+            assert_int_equal(transfer.tx.to_len, ADDRESS_LENGTH);
+            assert_true(creation.tx.has_data == (data_lengths[di] != 0));
+            assert_true(transfer.tx.has_data == (data_lengths[di] != 0));
+        }
     }
 }
 
@@ -610,6 +657,7 @@ static void test_init_resets_state(void **state) {
     assert_false(c.s.failed);
     assert_int_equal(c.s.total_len, 0);
     assert_int_equal(c.tx.to[0], 0);
+    assert_int_equal(c.tx.to_len, 0);
     assert_false(c.tx.has_data);
     assert_false(c.tx.has_access_list);
 }
@@ -648,6 +696,7 @@ int main(void) {
         cmocka_unit_test(test_builder_matches_reference_vectors),
         cmocka_unit_test(test_valid_64byte_recipient_all_chunk_sizes),
         cmocka_unit_test(test_contract_creation),
+        cmocka_unit_test(test_contract_creation_differs_from_zero_address),
         cmocka_unit_test(test_reject_20byte_recipient),
         cmocka_unit_test(test_reject_legacy_10_fields),
         cmocka_unit_test(test_reject_oversized_nonce),
