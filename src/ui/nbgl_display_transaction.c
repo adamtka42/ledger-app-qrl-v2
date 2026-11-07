@@ -38,8 +38,9 @@
 #include "address.h"
 
 static char g_from_address[1 + ADDRESS_SIZE * 2 + 1];
-static char g_amount[TX_FORMAT_MAX_AMOUNT_LEN + 5];
+static char g_amount[TX_FORMAT_MAX_AMOUNT_LEN + TOKEN_SYMBOL_MAX + 2];
 static char g_to_address[1 + ADDRESS_SIZE * 2 + 1];
+static char g_token_contract[1 + ADDRESS_SIZE * 2 + 1];
 static char g_max_fees[TX_FORMAT_MAX_AMOUNT_LEN + 5];
 static char g_chain_id[TX_FORMAT_MAX_DECIMAL_DIGITS + 1];
 static char g_nonce[21];
@@ -47,7 +48,10 @@ static char g_gas_limit[21];
 static char g_gas_tip_cap[TX_FORMAT_MAX_AMOUNT_LEN + 5];
 static char g_tx_hash[65];
 
-static nbgl_contentTagValue_t pairs[9];
+// Maximum review fields: From, Amount, To or Operation, Token contract,
+// Chain ID, Gas limit, Priority fee / gas, Max fees, Nonce, Transaction hash.
+enum { MAX_REVIEW_PAIRS = 10 };
+static nbgl_contentTagValue_t pairs[MAX_REVIEW_PAIRS];
 static nbgl_contentTagValueList_t pairList;
 
 static int abort_display(uint16_t status) {
@@ -126,6 +130,16 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         return abort_display(SW_BAD_STATE);
     }
     const bool is_contract_creation = (tx->to_len == 0);
+    const token_call_t *token = &G_context.tx_info.token_call;
+    const token_metadata_t *metadata = &G_context.tx_info.token_metadata;
+    const char *review_title = "Review transaction\n";
+    if (token->enabled) {
+#ifdef TOKEN_METADATA_TEST_KEY
+        review_title = "TEST token transfer";
+#else
+        review_title = "Send tokens";
+#endif
+    }
 
     print_tx_utils(tx);
 
@@ -151,16 +165,28 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
 
     // Format amount
     char amount[TX_FORMAT_MAX_AMOUNT_LEN] = {0};
-    if (!format_qrl_amount(tx->value, tx->value_len, amount, sizeof(amount)))
+    if (token->enabled) {
+        char integer[TX_FORMAT_MAX_DECIMAL_DIGITS + 1];
+        if (!uint8_array_to_decimal(token->amount, sizeof(token->amount), integer, sizeof(integer)) ||
+            !format_with_decimals(integer, metadata->decimals, amount, sizeof(amount))) {
+            return abort_display(SW_DISPLAY_AMOUNT_FAIL);
+        }
+    } else if (!format_qrl_amount(tx->value, tx->value_len, amount, sizeof(amount))) {
         return abort_display(SW_DISPLAY_AMOUNT_FAIL);
+    }
     PRINTF("amount %s\n", amount);
     memset(g_amount, 0, sizeof(g_amount));
-    snprintf(g_amount, sizeof(g_amount), "QRL %s", amount);
+    snprintf(g_amount, sizeof(g_amount), "%s %s", token->enabled ? metadata->symbol : "QRL", amount);
 
     // An empty recipient creates a contract; it is not the zero address.
     memset(g_to_address, 0, sizeof(g_to_address));
     if (!is_contract_creation &&
-        !format_checksummed_address(tx->to, g_to_address, sizeof(g_to_address))) {
+        !format_checksummed_address(token->enabled ? token->target : tx->to,
+                                    g_to_address, sizeof(g_to_address))) {
+        return abort_display(SW_DISPLAY_ADDRESS_FAIL);
+    }
+    if (token->enabled &&
+        !format_checksummed_address(tx->to, g_token_contract, sizeof(g_token_contract))) {
         return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
     PRINTF("to %s\n", g_to_address);
@@ -191,6 +217,9 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     size_t count = 0;
 #define ADD_PAIR(label, text)          \
     do {                               \
+        if (count >= MAX_REVIEW_PAIRS) { \
+            return abort_display(SW_BAD_STATE); \
+        }                              \
         pairs[count].item = (label);   \
         pairs[count++].value = (text); \
     } while (0)
@@ -200,6 +229,9 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         ADD_PAIR("Operation", "Create contract");
     } else {
         ADD_PAIR("To", g_to_address);
+    }
+    if (token->enabled) {
+        ADD_PAIR("Token contract", g_token_contract);
     }
     ADD_PAIR("Chain ID", g_chain_id);
     ADD_PAIR("Gas limit", g_gas_limit);
@@ -240,7 +272,7 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         nbgl_useCaseReview(TYPE_TRANSACTION,
                            &pairList,
                            &ICON_APP_BOILERPLATE,
-                           "Review transaction\n",
+                           review_title,
                            NULL,
 #ifdef SCREEN_SIZE_WALLET
                            "Sign transaction\n",
