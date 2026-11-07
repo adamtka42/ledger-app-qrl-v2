@@ -140,6 +140,7 @@ static bool field_begin(tx_stream_t *s, zond_tx_t *tx, bool is_list, uint32_t le
                 return false;
             }
             tx->has_data = (len != 0);
+            tx->data_len = len;
             break;
         case TX_F_ACCESS_LIST:
             if (!is_list) {
@@ -210,9 +211,13 @@ static bool field_store(const tx_stream_t *s, zond_tx_t *tx, const uint8_t *src,
         case TX_F_DESCRIPTOR:
             memcpy(tx->descriptor + pos, src, n);
             break;
+        case TX_F_DATA:
+            if (s->field_len == TOKEN_CALL_CALLDATA_LEN) {
+                memcpy(tx->data + pos, src, n);
+            }
+            break;
         default:
-            // TX_F_DATA, TX_F_ACCESS_LIST, TX_F_EXTRA_PARAMS: hashed by the
-            // caller, not retained
+            // Other data, TX_F_ACCESS_LIST, TX_F_EXTRA_PARAMS: hashed by the caller.
             break;
     }
     return true;

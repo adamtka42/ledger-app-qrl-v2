@@ -29,8 +29,11 @@ class InsType(IntEnum):
     GET_APP_NAME   = 0x04
     GET_PUBLIC_KEY = 0x05
     SIGN_TX        = 0x06
+    PROVIDE_TOKEN_METADATA = 0x0A
 
 class Errors(IntEnum):
+    SW_TOKEN_METADATA_INVALID  = 0x6A80
+    SW_TOKEN_METADATA_UNTRUSTED = 0x6982
     SW_DENY                    = 0x6985
     SW_WRONG_P1P2              = 0x6A86
     SW_WRONG_DATA_LENGTH       = 0x6A87
@@ -98,12 +101,16 @@ class BoilerplateCommandSender:
 
 
     @contextmanager
-    def sign_tx(self, path: str, transaction: bytes) -> Generator[None, None, None]:
+    def sign_tx(self, path: str, transaction: bytes,
+                token_metadata: Optional[bytes] = None) -> Generator[None, None, None]:
         self.backend.exchange(cla=CLA,
                               ins=InsType.SIGN_TX,
                               p1=0x00,
                               p2=0x00,
                               data=pack_derivation_path(path))
+        if token_metadata is not None:
+            self.backend.exchange(cla=CLA, ins=InsType.PROVIDE_TOKEN_METADATA,
+                                  p1=0, p2=0, data=token_metadata)
         messages = split_message(transaction, MAX_APDU_LEN)
         # idx: int = P1.P1_START + 1
 

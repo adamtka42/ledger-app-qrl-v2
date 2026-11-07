@@ -110,7 +110,9 @@ int handler_sign_tx(buffer_t *cdata, uint8_t p1, uint8_t p2) {
         G_context.state = STATE_PARSED;
 
         zond_tx_t *tx = &G_context.tx_info.tx_data;
-        bool blind = tx->has_data || tx->has_access_list;
+        bool token = token_call_prepare(tx, &G_context.tx_info.token_metadata,
+                                         &G_context.tx_info.token_call);
+        bool blind = (tx->has_data || tx->has_access_list) && !token;
         if (blind && !N_storage.enable_blind_signing) {
             return abort_sign_tx(SW_DENY);
         }

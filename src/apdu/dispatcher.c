@@ -31,6 +31,7 @@
 #include "get_app_name.h"
 #include "get_public_key.h"
 #include "sign_tx.h"
+#include "provide_token_metadata.h"
 
 int apdu_dispatcher(const command_t *cmd) {
     LEDGER_ASSERT(cmd != NULL, "NULL cmd");
@@ -75,6 +76,8 @@ int apdu_dispatcher(const command_t *cmd) {
             buf.offset = 0;
 
             return handler_get_public_key(&buf, (bool) cmd->p1);
+        case PROVIDE_TOKEN_METADATA:
+            return handler_provide_token_metadata(cmd->data, cmd->lc, cmd->p1, cmd->p2);
         case SIGN_TX:
             // The handler also aborts the session on invalid or empty commands.
             buf.ptr = cmd->data;

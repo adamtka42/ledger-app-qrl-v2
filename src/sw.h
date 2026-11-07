@@ -5,6 +5,14 @@
  */
 #define SW_OK 0x9000
 /**
+ * Status word for invalid token metadata format or field values.
+ */
+#define SW_TOKEN_METADATA_INVALID 0x6A80
+/**
+ * Status word for failed token metadata authentication or no configured issuer.
+ */
+#define SW_TOKEN_METADATA_UNTRUSTED 0x6982
+/**
  * Status word for denied by user.
  */
 #define SW_DENY 0x6985

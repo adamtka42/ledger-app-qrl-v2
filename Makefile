@@ -80,6 +80,51 @@ VARIANT_VALUES = QRL
 APP_STACK_MIN_SIZE = 20500
 
 ########################################
+#        Token metadata issuer         #
+########################################
+# Optional trusted issuer for QRL token metadata: its uncompressed SEC1 P-256
+# public key as 130 hex characters (04 || x || y). Without an issuer the
+# metadata command is rejected; native transfers and blind signing still work.
+#   make TOKEN_METADATA_PUBLIC_KEY=04<x><y>
+# The key is validated and decoded here so that a misconfigured value stops the
+# build instead of shipping firmware that rejects every descriptor at runtime.
+# INSECURE public test authority (P-256 generator, private scalar 1): only
+# selectable through TOKEN_METADATA_TEST_KEY=1, which also requires DEBUG=1.
+TOKEN_METADATA_TEST_PUBLIC_KEY := 046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5
+ifneq ($(TOKEN_METADATA_PUBLIC_KEY),)
+ifeq ($(TOKEN_METADATA_TEST_KEY),1)
+$(error Select either TOKEN_METADATA_PUBLIC_KEY or TOKEN_METADATA_TEST_KEY)
+endif
+# Lower-case the value, then strip every hex digit: anything left is not hex.
+token_key := $(subst A,a,$(subst B,b,$(subst C,c,$(subst D,d,$(subst E,e,$(subst F,f,$(TOKEN_METADATA_PUBLIC_KEY)))))))
+token_key_rest := $(token_key)
+$(foreach c,0 1 2 3 4 5 6 7 8 9 a b c d e f,$(eval token_key_rest := $$(subst $(c),,$$(token_key_rest))))
+ifneq ($(token_key_rest),)
+$(error TOKEN_METADATA_PUBLIC_KEY must contain only hex digits, without a 0x prefix)
+endif
+# Only hex digits remain, so the value is safe to hand to the shell.
+ifneq ($(shell printf '%s' '$(token_key)' | grep -Ecx '04[0-9a-f]{128}'),1)
+$(error TOKEN_METADATA_PUBLIC_KEY must be 130 hex characters starting with 04 (uncompressed SEC1 P-256 key))
+endif
+ifeq ($(token_key),$(TOKEN_METADATA_TEST_PUBLIC_KEY))
+$(error TOKEN_METADATA_PUBLIC_KEY is the public test authority; use DEBUG=1 TOKEN_METADATA_TEST_KEY=1 instead)
+endif
+# Python's standard library checks coordinate ranges and the P-256 equation.
+# The hex-only validation above keeps the shell argument safe.
+token_key_bytes := $(shell python3 tools/token_metadata_key.py '$(token_key)')
+ifeq ($(token_key_bytes),)
+$(error TOKEN_METADATA_PUBLIC_KEY validation failed; a valid P-256 point and Python 3 are required)
+endif
+DEFINES += TOKEN_METADATA_PUBLIC_KEY_BYTES=$(token_key_bytes)
+endif
+ifeq ($(TOKEN_METADATA_TEST_KEY),1)
+ifneq ($(DEBUG),1)
+$(error TOKEN_METADATA_TEST_KEY=1 requires DEBUG=1; never use it for release builds)
+endif
+DEFINES += TOKEN_METADATA_TEST_KEY
+endif
+
+########################################
 #     Application custom permissions   #
 ########################################
 # See SDK `include/appflags.h` for the purpose of each permission
