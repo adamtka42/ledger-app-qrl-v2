@@ -41,6 +41,17 @@ It checks that failed preparation clears the session and returns to the home
 screen, and that clear/blind reviews show a failure instead of a signed status
 when signing or self-verification fails.
 
+`test_token_transfer` covers the 64-byte QRVM transfer ABI, every transaction
+split point, token/network binding, metadata parsing, and exact amount formatting.
+`test_token_metadata_key` checks build-time issuer key validation, including
+off-curve points, coordinate ranges, malformed encodings, and the test-key gate.
+It requires Python 3 and can also run with `python3 unit-tests/test_token_metadata_key.py`
+from the repository root.
+Device tests in `tests/test_token_transfer_cmd.py` additionally verify real
+metadata signatures and ML-DSA transaction signatures in Speculos. Positive
+device tests require `DEBUG=1 TOKEN_METADATA_TEST_KEY=1`; see
+`APP_SPECIFICATION.md` for issuer configuration and the APDU sequence.
+
 ## Generate code coverage
 
 Just execute in `unit-tests` folder

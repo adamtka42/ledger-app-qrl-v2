@@ -168,6 +168,92 @@ None
 | ---                   | ---      |
 | Application name      | variable |
 
+### PROVIDE TOKEN METADATA
+
+Accepts one authenticated token descriptor for the current transaction session.
+It must be sent **after** `SIGN_TX/DATA_FIRST` and **before** any transaction bytes:
+
+1. `SIGN_TX`, P1=`00`, P2=`00`: BIP32 path.
+2. `PROVIDE_TOKEN_METADATA`, CLA=`E0`, INS=`0A`, P1=`00`, P2=`00`: payload below.
+3. Existing `SIGN_TX/DATA_MORE` and `SIGN_TX/DATA_LAST`: unchanged transaction bytes.
+
+| Payload field | Bytes | Encoding |
+| --- | --- | --- |
+| Version | 1 | `01` |
+| Chain ID | 32 | Unsigned big-endian, left-padded with zeros; nonzero |
+| Token contract | 64 | Raw QRL address bytes, without textual `Q`; nonzero |
+| Decimals | 1 | `0` through `77` |
+| Symbol length | 1 | `1` through `12` |
+| Symbol | variable | ASCII letters, digits, `.`, `_`, `-`; no NUL/whitespace; never `QRL` in any letter case |
+| Signature | 8–72 | DER ECDSA P-256 signature |
+
+The issuer signs `SHA256(ASCII("QRL-TOKEN-METADATA-V1") || body)`, where `body`
+contains every field from Version through Symbol. There is no NUL separator.
+The complete payload fits in one short APDU. A malformed or unauthenticated
+descriptor aborts the signing session. It is never accepted as unsigned metadata.
+
+The issuer's uncompressed 65-byte P-256 public key is set at build time:
+
+```sh
+make TOKEN_METADATA_PUBLIC_KEY=<130-hex-character-SEC1-public-key>
+```
+
+The build requires 130 hex characters starting with `04`, checks that the
+coordinates form a valid P-256 point, and rejects the public test key. Validation
+uses Python 3's standard library and stops the build on an invalid key.
+
+No production authority is configured by default: the metadata command returns
+`6982`, while existing native transfers and blind signing remain available.
+The issuer must curate tokens, ABI profiles, and stable symbol/decimals bindings.
+An issuer backend and wallet integration must provide signed QRL descriptors;
+Ethereum's existing 20-byte token metadata is not compatible with this payload.
+This release uses classical ECDSA for metadata authentication; QRL transaction
+signatures remain ML-DSA-87. A post-quantum metadata authority would require a
+versioned extension of this format and its verification implementation.
+
+For emulator tests only:
+
+```sh
+make DEBUG=1 TOKEN_METADATA_TEST_KEY=1
+pytest --device nanosp tests/test_token_transfer_cmd.py
+```
+
+The test issuer uses the publicly known P-256 scalar `1`, requires `DEBUG=1`, and
+displays `TEST token transfer` during review. The same key is rejected when
+provided as a production key. Never deploy the test-authority build for funds.
+Positive metadata tests skip on builds that do not trust the explicit test key;
+negative authentication tests still run. Tests use synthetic contracts, not a
+claim that a real token has been approved or deployed on a particular network.
+
+#### Supported clear-signed call
+
+Only `transfer(address,uint256)` is decoded in this version:
+
+- Selector: `a9059cbb` (4 bytes).
+- Recipient: one 64-byte QRVM ABI word.
+- Amount: one 64-byte word, with the upper 32 bytes zero (`uint256`).
+- Exact calldata length: 132 bytes; no additional bytes.
+- Token contract and full Chain ID must match the verified descriptor.
+- Native QRL value must be zero; access list must be empty.
+
+The screen shows the sending account, token amount/symbol, actual token
+recipient, token contract, Chain ID, and maximum fees in QRL, plus optional nonce
+and transaction hash. The signature covers the original complete transaction,
+including calldata. Recognition does not simulate execution or guarantee a
+successful transfer or the amount ultimately credited by a custom token.
+
+Other calls, mismatching descriptors, noncanonical token arguments, native
+value, or nonempty access lists follow the existing blind-signing policy; with
+blind signing disabled they are rejected. `approve`, `transferFrom`, NFT calls,
+routers, and general ABI decoding are outside this version's supported profile.
+
+Descriptors exist only in RAM for one signing session. `DATA_FIRST`, address
+requests, and aborted sessions invalidate them; none are persisted to NVM or
+reused automatically. Signature chunks additionally require an approved session.
+
+See `tests/application_client/token_metadata.py` for payload generation and
+`examples/token_call.py` for an interactive Speculos example.
+
 ## Status Words
 
 The following standard Status Words are returned for all APDUs.
@@ -175,6 +261,8 @@ The following standard Status Words are returned for all APDUs.
 | SW       | SW name                     | Description                                           |
 | ---      | ---                         | ---                                                   |
 |   6985   | SW_DENY                     | Rejected by user                                      |
+|   6982   | SW_TOKEN_METADATA_UNTRUSTED  | Invalid signature or no configured metadata authority |
+|   6A80   | SW_TOKEN_METADATA_INVALID   | Malformed or unsupported token descriptor              |
 |   6A86   | SW_WRONG_P1P2               | Either P1 or P2 is incorrect                          |
 |   6A87   | SW_WRONG_DATA_LENGTH        | Lc or minimum APDU length is incorrect                |
 |   6D00   | SW_INS_NOT_SUPPORTED        | No command exists with INS                            |
