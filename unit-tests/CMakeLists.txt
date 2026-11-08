@@ -123,3 +123,6 @@ set_property(TARGET test_crypto_cleanup APPEND_STRING PROPERTY LINK_FLAGS
     " -Wl,--wrap=shake256_absorb,--wrap=shake256_squeeze,--wrap=poly_vec_l_uniform_eta,--wrap=poly_vec_k_uniform_eta,--wrap=poly_vec_l_chk_norm")
 target_link_libraries(test_crypto_cleanup PRIVATE cmocka gcov)
 add_test(test_crypto_cleanup test_crypto_cleanup)
+
+# Approval review uses token-call classification helpers.
+target_link_libraries(test_transaction_review PRIVATE token_call)

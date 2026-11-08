@@ -2,48 +2,12 @@ import pytest
 
 from Crypto.Hash import keccak
 from dilithium_py.ml_dsa import ML_DSA_87
-from ragger.bip import pack_derivation_path
 from ragger.error import ExceptionRAPDU
-from ragger.navigator import NavIns, NavInsID
 
 from application_client.boilerplate_command_sender import BoilerplateCommandSender, CLA, InsType, Errors
 from application_client.token_metadata import TEST_CONTRACT, make_test_metadata, transfer_calldata
-from application_client.transaction import build_transaction_preimage
-from test_sign_cmd import (
-    SIGNING_CONTEXT, get_public_key_chunks, get_signature_chunks,
-)
-
-PATH = "m/44'/238'/0'/0/0"
-
-
-def preimage(data=None, *, chain_id=1, contract=TEST_CONTRACT, value=0, access_list=b"\xc0"):
-    if data is None:
-        data = transfer_calldata(10_000_000)
-    return build_transaction_preimage(chain_id=chain_id, nonce=3, gas_tip_cap=0,
-                                      gas_fee_cap=2_550_000_000, gas=100_000, to=contract,
-                                      value=value, data=data, access_list=access_list)
-
-
-def start(backend):
-    backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=0, p2=0, data=pack_derivation_path(PATH))
-
-
-def provide(backend, payload, *, p1=0, p2=0):
-    return backend.exchange(cla=CLA, ins=InsType.PROVIDE_TOKEN_METADATA,
-                            p1=p1, p2=p2, data=payload)
-
-
-@pytest.fixture
-def token_issuer(backend, request):
-    start(backend)
-    try:
-        provide(backend, make_test_metadata())
-    except ExceptionRAPDU as exc:
-        if exc.status == Errors.SW_TOKEN_METADATA_NO_ISSUER:
-            if request.config.getoption("--token-metadata-test-key"):
-                pytest.fail("No token metadata issuer configured; expected DEBUG=1 TOKEN_METADATA_TEST_KEY=1")
-            pytest.skip("Requires a build with DEBUG=1 TOKEN_METADATA_TEST_KEY=1")
-        raise
+from application_client.transaction_helpers import SIGNING_CONTEXT, get_public_key_chunks, get_signature_chunks
+from application_client.token_calls import PATH, preimage, start, provide, enable_nonce_and_hash
 
 
 def test_token_metadata_wrong_issuer_aborts_session(backend, request):
@@ -160,23 +124,7 @@ def test_clear_sign_token_transfer(backend, token_issuer, scenario_navigator, de
 
 
 def test_token_review_with_nonce_and_hash(backend, token_issuer, device, navigator, scenario_navigator):
-    if device.is_nano:
-        for text in ("App settings", "Nonce", "Transaction hash", "Back"):
-            navigator.navigate_until_text(NavInsID.RIGHT_CLICK, [NavInsID.BOTH_CLICK],
-                                           text=text, screen_change_before_first_instruction=False)
-    else:
-        navigator.navigate([NavInsID.USE_CASE_HOME_SETTINGS],
-                           screen_change_before_first_instruction=False)
-        for text in ("Nonce", "Transaction hash"):
-            navigator.navigate_until_text(NavInsID.USE_CASE_SETTINGS_NEXT, [], text=text,
-                                           screen_change_before_first_instruction=False)
-            # Locate the setting's row: pagination and spacing differ on Flex and Stax.
-            events = backend.get_current_screen_content()["events"]
-            row = next(event for event in events if event.get("text") == text)
-            navigator.navigate([NavIns(NavInsID.TOUCH, (200, row["y"] + 5))],
-                               screen_change_before_first_instruction=False)
-        navigator.navigate([NavInsID.USE_CASE_SETTINGS_MULTI_PAGE_EXIT],
-                           screen_change_before_first_instruction=False)
+    enable_nonce_and_hash(backend, device, navigator)
     client = BoilerplateCommandSender(backend)
     tx = preimage()
     client.get_public_key(PATH)

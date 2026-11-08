@@ -187,6 +187,12 @@ It must be sent **after** `SIGN_TX/DATA_FIRST` and **before** any transaction by
 | Symbol | variable | ASCII letters, digits, `.`, `_`, `-`; no NUL/whitespace; never `QRL` in any letter case |
 | Signature | 8–72 | DER ECDSA P-256 signature |
 
+Issuers must attest only fungible SQRCTF1-compatible contracts on the specified
+network. This payload has no token-standard discriminator: ERC-721 uses the same
+`approve(address,uint256)` selector (`095ea7b3`), but the integer is a token ID,
+not a spending limit. The device cannot distinguish these semantics from
+calldata alone; issuers must not sign these descriptors for NFT contracts.
+
 The issuer signs `SHA256(ASCII("QRL-TOKEN-METADATA-V1") || body)`, where `body`
 contains every field from Version through Symbol. There is no NUL separator.
 The complete payload fits in one short APDU. A malformed or unauthenticated
@@ -226,12 +232,12 @@ With `--token-metadata-test-key`, this response fails the test instead; invalid
 signatures always fail fixture setup. Negative authentication tests still run. Tests use synthetic contracts, not a
 claim that a real token has been approved or deployed on a particular network.
 
-#### Supported clear-signed call
+#### Supported clear-signed calls
 
-Only `transfer(address,uint256)` is decoded in this version:
+`transfer(address,uint256)` and `approve(address,uint256)` are decoded:
 
-- Selector: `a9059cbb` (4 bytes).
-- Recipient: one 64-byte QRVM ABI word.
+- Selector: `a9059cbb` for transfer, `095ea7b3` for approve (4 bytes).
+- Recipient or spender: one 64-byte QRVM ABI word; approve requires a nonzero spender.
 - Amount: one 64-byte word, with the upper 32 bytes zero (`uint256`).
 - Exact calldata length: 132 bytes; no additional bytes. The RLP parser retains
   the first 256 calldata bytes for operation decoders and records the full length;
@@ -246,9 +252,27 @@ and transaction hash. The signature covers the original complete transaction,
 including calldata. Recognition does not simulate execution or guarantee a
 successful transfer or the amount ultimately credited by a custom token.
 
+Approvals have a separate review: Owner, Spending limit, Spender, Token contract,
+Chain ID and QRL fees, plus optional nonce and transaction hash. A zero limit
+is presented as revocation in the review. Exactly `2^256 - 1` is displayed as
+`<symbol> Unlimited` with an explicit unlimited-spending confirmation on all
+four supported models, including Nano S+ and Nano X; smaller
+values always retain their exact numeric limit. Approval sets the new allowance
+and does not transfer tokens. The device neither queries the current allowance
+nor guarantees execution. Issuers must only attest fungible SQRCTF1-compatible
+contracts; the approve selector alone also exists in other token standards.
+
+Zero-address policy: token transfers retain the existing literal-recipient review,
+including a zero recipient, to preserve transfer compatibility. This is not a
+claim that the call succeeds, and the review does not infer a burn: standard
+SQRCTF1 contracts revert such transfers. Approvals use a stricter supported profile
+and require a nonzero spender; a zero spender is not a revoke-all instruction.
+Revocation is `approve(nonzero_spender, 0)`. This approval feature does not
+change the established transfer policy or simulate contract execution.
+
 Other calls, mismatching descriptors, noncanonical token arguments, native
 value, or nonempty access lists follow the existing blind-signing policy; with
-blind signing disabled they are rejected. `approve`, `transferFrom`, NFT calls,
+blind signing disabled they are rejected. `transferFrom`, NFT calls,
 routers, and general ABI decoding are outside this version's supported profile.
 
 Descriptors exist only in RAM for one signing session. `DATA_FIRST`, address
@@ -257,6 +281,17 @@ reused automatically. Signature chunks additionally require an approved session.
 
 See `tests/application_client/token_metadata.py` for payload generation and
 `examples/token_call.py` for an interactive Speculos example.
+
+For manual approval review (no transaction is broadcast):
+
+```sh
+tests/venv/bin/python examples/token_call.py --test-key --operation approve --units 25000000
+tests/venv/bin/python examples/token_call.py --test-key --operation approve --units 0
+tests/venv/bin/python examples/token_call.py --test-key --operation approve --unlimited
+```
+
+Use `--url` for the emulator API endpoint and `--spender Q...` to change the
+authorized spender. The metadata APDU and session ordering remain unchanged.
 
 ## Status Words
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sign a QRL token transfer in Speculos; never connects to a blockchain node.
+"""Sign a QRL token transfer or approval in Speculos; never connects to a node.
 
 Run with the Python environment from tests/requirements.txt. The --test-key
 option requires an app built with DEBUG=1 TOKEN_METADATA_TEST_KEY=1.
@@ -16,7 +16,8 @@ from Crypto.Signature import DSS
 from dilithium_py.ml_dsa import ML_DSA_87
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
-from application_client.token_metadata import DOMAIN, metadata_body, transfer_calldata
+from application_client.token_metadata import DOMAIN, metadata_body, transfer_calldata, approval_calldata
+
 from application_client.transaction import build_transaction_preimage
 
 
@@ -36,22 +37,36 @@ def main():
     parser.add_argument("--chain-id", type=int, default=1)
     parser.add_argument("--nonce", type=int, default=0)
     parser.add_argument("--contract", default="Q" + "22" * 64)
-    parser.add_argument("--recipient", default="Q" + "11" * 64)
+    parser.add_argument("--operation", choices=("transfer", "approve"), default="transfer")
+    parser.add_argument("--recipient", help="Token recipient, for transfer only")
+    parser.add_argument("--spender", help="Authorized spender, for approve only")
     parser.add_argument("--symbol", default="TKN")
     parser.add_argument("--decimals", type=int, default=6)
-    parser.add_argument("--units", type=int, default=10_000_000, help="Raw token units, before decimals")
+    limit = parser.add_mutually_exclusive_group()
+    limit.add_argument("--units", type=int, default=10_000_000, help="Raw units; approve with 0 to revoke")
+    limit.add_argument("--unlimited", action="store_true", help="Approve the maximum uint256 allowance")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    contract, recipient = address(args.contract), address(args.recipient)
+    if args.operation == "transfer" and (args.spender is not None or args.unlimited):
+        parser.error("--spender and --unlimited require --operation approve")
+    if args.operation == "approve" and args.recipient is not None:
+        parser.error("Use --spender for approvals")
+    target_text = (args.spender if args.operation == "approve" else args.recipient) or "Q" + "11" * 64
+    contract, target = address(args.contract), address(target_text)
+    units = 2**256 - 1 if args.unlimited else args.units
+    calldata = (approval_calldata if args.operation == "approve" else transfer_calldata)(units, target)
     body = metadata_body(args.chain_id, contract, args.symbol, args.decimals)
     key = ECC.construct(curve="P-256", d=1) if args.test_key else ECC.import_key(args.issuer_key.read_bytes())
     signature = DSS.new(key, "deterministic-rfc6979", encoding="der").sign(SHA256.new(DOMAIN + body))
     metadata = body + signature
     tx = build_transaction_preimage(chain_id=args.chain_id, nonce=args.nonce, gas_tip_cap=0,
                                      gas_fee_cap=2_550_000_000, gas=120_000, to=contract,
-                                     value=0, data=transfer_calldata(args.units, recipient))
-    print(f"Token: {args.symbol}; raw units: {args.units}; decimals: {args.decimals}")
-    print(f"Contract: {args.contract}\nRecipient: {args.recipient}\nChain ID: {args.chain_id}")
+                                     value=0, data=calldata)
+    print(f"Operation: {args.operation}; token: {args.symbol}; raw units: {units}; decimals: {args.decimals}")
+    target_label = "Spender" if args.operation == "approve" else "Recipient"
+    print(f"Contract: {args.contract}\n{target_label}: {target_text}\nChain ID: {args.chain_id}")
+    if args.operation == "approve" and units == 2**256 - 1:
+        print("Unlimited approval: the spender may spend all current and future tokens until revoked.")
     if args.dry_run:
         print(f"Built {len(metadata)} metadata bytes and {len(tx)} transaction bytes; no requests sent.")
         return
@@ -80,7 +95,7 @@ def main():
     chunks = [tx[i:i+255] for i in range(0, len(tx), 255)]
     for chunk in chunks[:-1]:
         exchange(6, p1=1, data=chunk)
-    print("Review and approve/reject the token transfer on the emulator.", flush=True)
+    print(f"Review and approve/reject the token {args.operation} on the emulator.", flush=True)
     first = exchange(6, p1=2, data=chunks[-1])
     signature = first + b"".join(exchange(6, p1=2, p2=i) for i in range(1, 18))
     digest = keccak.new(digest_bits=256, data=tx).digest()

@@ -43,8 +43,9 @@ when signing or self-verification fails.
 
 `test_tx_stream` also checks retained calldata prefixes for arbitrary lengths,
 including buffer boundaries and larger streamed payloads, across APDU splits.
-`test_token_transfer` covers the 64-byte QRVM transfer ABI, every transaction
+`test_token_transfer` covers the 64-byte QRVM transfer/approve ABI, every transaction
 split point, token/network binding, metadata parsing, and exact amount formatting.
+It also distinguishes limited, zero/revoked and unlimited approvals.
 `test_transaction_builder` checks the shared Python RLP builder against existing
 native/token transaction vectors and canonical length/integer boundaries. It runs
 without an emulator or third-party Python packages.
@@ -52,7 +53,7 @@ without an emulator or third-party Python packages.
 off-curve points, coordinate ranges, malformed encodings, and the test-key gate.
 It requires Python 3 and can also run with `python3 unit-tests/test_token_metadata_key.py`
 from the repository root.
-Device tests in `tests/test_token_transfer_cmd.py` additionally verify real
+Device tests in `tests/test_token_transfer_cmd.py` and `tests/test_token_approval_cmd.py` verify real
 metadata signatures and ML-DSA transaction signatures in Speculos. Positive
 device tests require `DEBUG=1 TOKEN_METADATA_TEST_KEY=1` and should run with
 `--token-metadata-test-key` so a missing issuer fails rather than skips; see
