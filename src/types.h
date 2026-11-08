@@ -9,6 +9,7 @@
 #include "constant.h"
 #include "tx_types.h"
 #include "keccak256.h"  // keccak256_ctx
+#include "personal_message.h"
 
 /**
  * Enumeration with expected INS of APDU commands.
@@ -18,16 +19,17 @@ typedef enum {
     GET_APP_NAME = 0x04,    /// name of the application
     GET_PUBLIC_KEY = 0x05,  /// public key of corresponding BIP32 path
     SIGN_TX = 0x06,         /// sign transaction with BIP32 path
-    VERIFY_MSG = 0x07       /// verify message with BIP32 path
+    VERIFY_MSG = 0x07,      /// verify message with BIP32 path
+    SIGN_PERSONAL_MESSAGE = 0x08  /// sign reviewed QRL personal-sign text
 } command_e;
 /**
  * Enumeration with parsing state.
  */
 typedef enum {
     STATE_NONE,       /// No state
-    STATE_RECEIVING,  /// Validated signing path, receiving transaction data
-    STATE_PARSED,     /// Transaction data parsed
-    STATE_APPROVED    /// Transaction data approved
+    STATE_RECEIVING,  /// Validated signing path, receiving transaction or message data
+    STATE_PARSED,     /// Data parsed and ready for review
+    STATE_APPROVED    /// Reviewed data approved for signing
 } state_e;
 
 /**
@@ -35,7 +37,8 @@ typedef enum {
  */
 typedef enum {
     CONFIRM_ADDRESS,     /// confirm address derived from public key
-    CONFIRM_TRANSACTION  /// confirm transaction information
+    CONFIRM_TRANSACTION, /// confirm transaction information
+    CONFIRM_MESSAGE      /// confirm personal message text
 } request_type_e;
 
 /**
@@ -65,6 +68,7 @@ typedef struct {
     union {
         pubkey_ctx_t pk_info;       /// public key context
         transaction_ctx_t tx_info;  /// transaction context
+        personal_message_t message_info;  /// personal-sign text, hash and review state
     };
     request_type_e req_type;              /// user request
     uint32_t bip32_path[MAX_BIP32_PATH];  /// BIP32 path

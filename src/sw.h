@@ -5,6 +5,10 @@
  */
 #define SW_OK 0x9000
 /**
+ * Status word for message bytes that cannot be safely reviewed as supported text.
+ */
+#define SW_MESSAGE_INVALID 0x6A80
+/**
  * Status word for denied by user.
  */
 #define SW_DENY 0x6985
