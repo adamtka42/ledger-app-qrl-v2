@@ -64,7 +64,8 @@ bool token_metadata_parse(const uint8_t *data,
 }
 
 bool token_call_prepare(const zond_tx_t *tx, const token_metadata_t *metadata, token_call_t *out) {
-    static const uint8_t selector[] = {0xa9, 0x05, 0x9c, 0xbb};
+    static const uint8_t transfer_selector[] = {0xa9, 0x05, 0x9c, 0xbb};
+    static const uint8_t approve_selector[] = {0x09, 0x5e, 0xa7, 0xb3};
     if (out == NULL) return false;
     memset(out, 0, sizeof(*out));
     if (tx == NULL || metadata == NULL || !metadata->verified || tx->chain_id_len == 0 ||
@@ -76,14 +77,38 @@ bool token_call_prepare(const zond_tx_t *tx, const token_metadata_t *metadata, t
         memcmp(tx->chain_id,
                metadata->chain_id + MAX_FIELD_SIZE - tx->chain_id_len,
                tx->chain_id_len) != 0 ||
-        memcmp(tx->data, selector, sizeof(selector)) != 0 ||
         !all_zero(tx->data + 4 + ADDRESS_LENGTH, MAX_FIELD_SIZE))
         return false;
+
+    token_call_kind_e kind;
+    if (memcmp(tx->data, transfer_selector, sizeof(transfer_selector)) == 0) {
+        kind = TOKEN_CALL_TRANSFER;
+    } else if (memcmp(tx->data, approve_selector, sizeof(approve_selector)) == 0) {
+        // A zero spender is outside the approval profile; it never means "revoke all".
+        // Transfer recipients retain the existing literal-address display policy.
+        if (all_zero(tx->data + 4, ADDRESS_LENGTH)) return false;
+        kind = TOKEN_CALL_APPROVE;
+    } else {
+        return false;
+    }
 
     /* QRVM ABI: four-byte selector followed by two 64-byte words. uint256
      * occupies the low 32 bytes of its word; its upper half must be zero. */
     memcpy(out->target, tx->data + 4, ADDRESS_LENGTH);
     memcpy(out->amount, tx->data + 4 + ADDRESS_LENGTH + MAX_FIELD_SIZE, MAX_FIELD_SIZE);
-    out->enabled = true;
+    out->kind = kind;
     return true;
+}
+
+bool token_call_is_unlimited_approval(const token_call_t *call) {
+    if (call == NULL || call->kind != TOKEN_CALL_APPROVE) return false;
+    for (size_t i = 0; i < sizeof(call->amount); i++) {
+        if (call->amount[i] != 0xff) return false;
+    }
+    return true;
+}
+
+bool token_call_is_approval_revocation(const token_call_t *call) {
+    return call != NULL && call->kind == TOKEN_CALL_APPROVE &&
+           all_zero(call->amount, sizeof(call->amount));
 }
