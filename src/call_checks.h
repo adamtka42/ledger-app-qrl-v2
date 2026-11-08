@@ -9,11 +9,15 @@
 
 #include "tx_types.h"
 
-static inline bool all_zero(const uint8_t *data, size_t len) {
+static inline bool all_bytes_equal(const uint8_t *data, size_t len, uint8_t value) {
     for (size_t i = 0; i < len; i++) {
-        if (data[i] != 0) return false;
+        if (data[i] != value) return false;
     }
     return true;
+}
+
+static inline bool all_zero(const uint8_t *data, size_t len) {
+    return all_bytes_equal(data, len, 0);
 }
 
 /* A call to tx->to that carries no native value and no access list. */

@@ -38,7 +38,7 @@ static void test_transfer_and_format(void **state) {
     token_call_t transfer;
     candidate(&tx, &metadata);
     assert_true(token_call_prepare(&tx, &metadata, &transfer));
-    assert_true(transfer.enabled);
+    assert_int_equal(transfer.kind, TOKEN_CALL_TRANSFER);
     assert_memory_equal(transfer.target, tx.data + 4, ADDRESS_LENGTH);
     char integer[100], amount[100];
     assert_true(
@@ -59,13 +59,14 @@ static void test_transfer_and_format(void **state) {
     assert_false(format_with_decimals(integer, TOKEN_DECIMALS_MAX, amount, 10));
 }
 
-static void test_no_false_clear_signing(void **state) {
-    (void) state;
+static void check_no_false_clear_signing(bool approval) {
     zond_tx_t tx;
     token_metadata_t metadata;
-    token_call_t transfer;
-    for (int mutation = 0; mutation < 14; mutation++) {
+    token_call_t call;
+    for (int mutation = 0; mutation < 15; mutation++) {
+        if (!approval && mutation == 12) continue;
         candidate(&tx, &metadata);
+        if (approval) memcpy(tx.data, (uint8_t[]) {0x09, 0x5e, 0xa7, 0xb3}, 4);
         switch (mutation) {
             case 0:
                 metadata.verified = false;
@@ -105,23 +106,86 @@ static void test_no_false_clear_signing(void **state) {
                 tx.chain_id_len = 0;
                 break;
             case 12:
-                tx.data_len = TX_CALLDATA_MAX_LEN;
+                memset(tx.data + 4, 0, ADDRESS_LENGTH);
                 break;
             case 13:
+                tx.data_len = TX_CALLDATA_MAX_LEN;
+                break;
+            case 14:
                 tx.data_len = TX_CALLDATA_MAX_LEN + 1;
                 break;
         }
-        memset(&transfer, 0xff, sizeof(transfer));
-        assert_false(token_call_prepare(&tx, &metadata, &transfer));
-        assert_false(transfer.enabled);
-        assert_memory_equal(transfer.target, (uint8_t[64]) {0}, 64);
+        memset(&call, 0xff, sizeof(call));
+        assert_false(token_call_prepare(&tx, &metadata, &call));
+        assert_int_equal(call.kind, TOKEN_CALL_NONE);
+        assert_memory_equal(call.target, (uint8_t[64]) {0}, 64);
     }
 }
 
-static size_t transaction(uint8_t *raw) {
+static void test_no_false_clear_signing(void **state) {
+    (void) state;
+    check_no_false_clear_signing(false);
+    check_no_false_clear_signing(true);
+}
+
+static void test_zero_target_policy(void **state) {
+    (void) state;
+    zond_tx_t tx;
+    token_metadata_t metadata;
+    token_call_t call;
+    candidate(&tx, &metadata);
+    memset(tx.data + 4, 0, ADDRESS_LENGTH);
+    // Preserve literal recipient display for existing transfers, even if the contract reverts.
+    assert_true(token_call_prepare(&tx, &metadata, &call));
+    assert_int_equal(call.kind, TOKEN_CALL_TRANSFER);
+    assert_memory_equal(call.target, (uint8_t[64]) {0}, ADDRESS_LENGTH);
+    // A zero spender is never interpreted as "revoke all".
+    memcpy(tx.data, (uint8_t[]) {0x09, 0x5e, 0xa7, 0xb3}, 4);
+    assert_false(token_call_prepare(&tx, &metadata, &call));
+    assert_int_equal(call.kind, TOKEN_CALL_NONE);
+}
+
+static void test_approval_and_limits(void **state) {
+    (void) state;
+    zond_tx_t tx;
+    token_metadata_t metadata;
+    token_call_t call;
+    candidate(&tx, &metadata);
+    // Independently encoded by local web3-qrl-abi: approve(Q111..., 123456789).
+    memcpy(tx.data, (uint8_t[]) {0x09, 0x5e, 0xa7, 0xb3}, 4);
+    assert_true(token_call_prepare(&tx, &metadata, &call));
+    assert_int_equal(call.kind, TOKEN_CALL_APPROVE);
+    assert_memory_equal(call.target, tx.data + 4, ADDRESS_LENGTH);
+    const uint8_t expected_amount[32] = {[28] = 0x07, 0x5b, 0xcd, 0x15};
+    assert_memory_equal(call.amount, expected_amount, sizeof(expected_amount));
+    assert_false(token_call_is_unlimited_approval(&call));
+    assert_false(token_call_is_approval_revocation(&call));
+
+    memset(tx.data + 100, 0, 32);
+    assert_true(token_call_prepare(&tx, &metadata, &call));
+    assert_true(token_call_is_approval_revocation(&call));
+    assert_false(token_call_is_unlimited_approval(&call));
+    memset(tx.data + 100, 0xff, 32);
+    assert_true(token_call_prepare(&tx, &metadata, &call));
+    assert_true(token_call_is_unlimited_approval(&call));
+    assert_false(token_call_is_approval_revocation(&call));
+    tx.data[131] = 0xfe;
+    assert_true(token_call_prepare(&tx, &metadata, &call));
+    assert_false(token_call_is_unlimited_approval(&call));
+    call.kind = TOKEN_CALL_TRANSFER;
+    memset(call.amount, 0xff, sizeof(call.amount));
+    assert_false(token_call_is_unlimited_approval(&call));
+    memset(call.amount, 0, sizeof(call.amount));
+    assert_false(token_call_is_approval_revocation(&call));
+    assert_false(token_call_is_unlimited_approval(NULL));
+    assert_false(token_call_is_approval_revocation(NULL));
+}
+
+static size_t transaction(uint8_t *raw, bool approval) {
     zond_tx_t tx;
     token_metadata_t metadata;
     candidate(&tx, &metadata);
+    if (approval) memcpy(tx.data, (uint8_t[]) {0x09, 0x5e, 0xa7, 0xb3}, 4);
     size_t n = 0;
     raw[n++] = 2;
     raw[n++] = 0xf8;
@@ -142,21 +206,22 @@ static size_t transaction(uint8_t *raw) {
     return n;
 }
 
-static void test_stream_every_boundary(void **state) {
-    (void) state;
+static void check_stream_every_boundary(bool approval) {
     uint8_t raw[256];
-    size_t len = transaction(raw);
+    size_t len = transaction(raw, approval);
     for (size_t boundary = 1; boundary < len; boundary++) {
         tx_stream_t stream;
         zond_tx_t tx, reference;
         token_metadata_t metadata;
-        token_call_t transfer;
+        token_call_t call;
         candidate(&reference, &metadata);
+        if (approval) memcpy(reference.data, (uint8_t[]) {0x09, 0x5e, 0xa7, 0xb3}, 4);
         tx_stream_init(&stream, &tx);
         assert_int_equal(tx_stream_feed(&stream, &tx, raw, boundary), TX_STREAM_PROCESSING);
         assert_int_equal(tx_stream_feed(&stream, &tx, raw + boundary, len - boundary),
                          TX_STREAM_FINISHED);
-        assert_true(token_call_prepare(&tx, &metadata, &transfer));
+        assert_true(token_call_prepare(&tx, &metadata, &call));
+        assert_int_equal(call.kind, approval ? TOKEN_CALL_APPROVE : TOKEN_CALL_TRANSFER);
         assert_memory_equal(tx.data, reference.data, 132);
     }
     tx_stream_t stream;
@@ -166,6 +231,12 @@ static void test_stream_every_boundary(void **state) {
         assert_int_equal(tx_stream_feed(&stream, &tx, raw + i, 1),
                          i + 1 == len ? TX_STREAM_FINISHED : TX_STREAM_PROCESSING);
     }
+}
+
+static void test_stream_every_boundary(void **state) {
+    (void) state;
+    check_stream_every_boundary(false);
+    check_stream_every_boundary(true);
 }
 
 static size_t metadata_payload(uint8_t *raw) {
@@ -247,6 +318,8 @@ int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_transfer_and_format),
         cmocka_unit_test(test_no_false_clear_signing),
+        cmocka_unit_test(test_zero_target_policy),
+        cmocka_unit_test(test_approval_and_limits),
         cmocka_unit_test(test_stream_every_boundary),
         cmocka_unit_test(test_metadata_parser),
     };

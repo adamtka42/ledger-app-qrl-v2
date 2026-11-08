@@ -65,19 +65,41 @@ static bool metadata_matches_tx(const token_metadata_t *metadata, const zond_tx_
 }
 
 bool token_call_prepare(const zond_tx_t *tx, const token_metadata_t *metadata, token_call_t *out) {
-    static const uint8_t selector[ABI_SELECTOR_LEN] = {0xa9, 0x05, 0x9c, 0xbb};
+    static const uint8_t transfer_selector[ABI_SELECTOR_LEN] = {0xa9, 0x05, 0x9c, 0xbb};
+    static const uint8_t approve_selector[ABI_SELECTOR_LEN] = {0x09, 0x5e, 0xa7, 0xb3};
     if (out == NULL) return false;
     memset(out, 0, sizeof(*out));
     if (tx == NULL || metadata == NULL) return false;
     if (!tx_is_plain_call(tx) || tx->data_len != TOKEN_CALL_CALLDATA_LEN) return false;
     if (!metadata_matches_tx(metadata, tx)) return false;
-    if (memcmp(tx->data, selector, sizeof(selector)) != 0) return false;
+
+    token_call_kind_e kind;
+    if (memcmp(tx->data, transfer_selector, sizeof(transfer_selector)) == 0) {
+        kind = TOKEN_CALL_TRANSFER;
+    } else if (memcmp(tx->data, approve_selector, sizeof(approve_selector)) == 0) {
+        // A zero spender is outside the approval profile; it never means "revoke all".
+        // Transfer recipients retain the existing literal-address display policy.
+        if (all_zero(abi_arg(tx->data, 0), ADDRESS_LENGTH)) return false;
+        kind = TOKEN_CALL_APPROVE;
+    } else {
+        return false;
+    }
 
     /* The amount is a uint256, so the upper half of its word must be zero. */
     const uint8_t *amount = abi_arg(tx->data, 1);
     if (!all_zero(amount, ABI_UINT256_OFFSET)) return false;
     memcpy(out->target, abi_arg(tx->data, 0), ADDRESS_LENGTH);
     memcpy(out->amount, amount + ABI_UINT256_OFFSET, MAX_FIELD_SIZE);
-    out->enabled = true;
+    out->kind = kind;
     return true;
+}
+
+bool token_call_is_unlimited_approval(const token_call_t *call) {
+    return call != NULL && call->kind == TOKEN_CALL_APPROVE &&
+           all_bytes_equal(call->amount, sizeof(call->amount), 0xff);
+}
+
+bool token_call_is_approval_revocation(const token_call_t *call) {
+    return call != NULL && call->kind == TOKEN_CALL_APPROVE &&
+           all_zero(call->amount, sizeof(call->amount));
 }

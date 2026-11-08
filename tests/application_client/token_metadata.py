@@ -35,3 +35,9 @@ def transfer_calldata(amount: int, recipient: bytes = TEST_RECIPIENT) -> bytes:
     if len(recipient) != 64 or not 0 <= amount < 2**256:
         raise ValueError("Invalid transfer arguments")
     return bytes.fromhex("a9059cbb") + recipient + amount.to_bytes(64, "big")
+
+
+def approval_calldata(amount: int, spender: bytes = TEST_RECIPIENT) -> bytes:
+    if len(spender) != 64 or not 0 <= amount < 2**256:
+        raise ValueError("Invalid approval arguments")
+    return bytes.fromhex("095ea7b3") + spender + amount.to_bytes(64, "big")
