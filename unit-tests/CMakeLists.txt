@@ -86,6 +86,11 @@ set_property(TARGET test_transaction_review APPEND_STRING PROPERTY LINK_FLAGS
 target_link_libraries(test_transaction_review PRIVATE tx_format address_format hashes cmocka gcov)
 add_test(test_transaction_review test_transaction_review)
 
+add_library(personal_message ../src/personal_message.c)
+add_executable(test_personal_message test_personal_message.c)
+target_link_libraries(test_personal_message PUBLIC personal_message hashes cmocka gcov)
+add_test(test_personal_message test_personal_message)
+
 # Exercise real crypto code with mocked Ledger syscalls and observed erasure.
 add_executable(test_crypto_cleanup
     test_crypto_cleanup.c

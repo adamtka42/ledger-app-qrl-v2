@@ -26,6 +26,9 @@ typedef void (*action_validate_cb)(bool);
  */
 int ui_display_address(void);
 
+/** Display the account, byte length and all personal-message text for approval. */
+int ui_display_personal_message(void);
+
 /**
  * Display transaction information on the device and ask confirmation to sign.
  *

@@ -29,8 +29,10 @@ class InsType(IntEnum):
     GET_APP_NAME   = 0x04
     GET_PUBLIC_KEY = 0x05
     SIGN_TX        = 0x06
+    SIGN_PERSONAL_MESSAGE = 0x08
 
 class Errors(IntEnum):
+    SW_MESSAGE_INVALID         = 0x6A80
     SW_DENY                    = 0x6985
     SW_WRONG_P1P2              = 0x6A86
     SW_WRONG_DATA_LENGTH       = 0x6A87
@@ -124,3 +126,14 @@ class BoilerplateCommandSender:
 
     def get_async_response(self) -> Optional[RAPDU]:
         return self.backend.last_async_response
+
+    @contextmanager
+    def sign_personal_message(self, path: str, message: bytes) -> Generator[None, None, None]:
+        self.backend.exchange(cla=CLA, ins=InsType.SIGN_PERSONAL_MESSAGE, p1=0, p2=0,
+                              data=pack_derivation_path(path) + len(message).to_bytes(4, "big"))
+        chunks = split_message(message, MAX_APDU_LEN) or [b""]
+        for chunk in chunks[:-1]:
+            self.backend.exchange(cla=CLA, ins=InsType.SIGN_PERSONAL_MESSAGE, p1=1, p2=0, data=chunk)
+        with self.backend.exchange_async(cla=CLA, ins=InsType.SIGN_PERSONAL_MESSAGE,
+                                          p1=2, p2=0, data=chunks[-1]) as response:
+            yield response

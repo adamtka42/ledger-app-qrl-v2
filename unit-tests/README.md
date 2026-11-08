@@ -41,6 +41,12 @@ It checks that failed preparation clears the session and returns to the home
 screen, and that clear/blind reviews show a failure instead of a signed status
 when signing or self-verification fails.
 
+`test_personal_message` checks QRL SDK hash vectors, every streaming split,
+text/length limits and lossless conversion of the full message into review
+fragments, including the empty message and maximum newline count. Device tests
+in `tests/test_personal_message_cmd.py` additionally cover approval/rejection,
+ML-DSA verification, malformed APDUs and isolation from transaction sessions.
+
 ## Generate code coverage
 
 Just execute in `unit-tests` folder

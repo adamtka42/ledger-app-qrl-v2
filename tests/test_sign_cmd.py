@@ -13,31 +13,12 @@ from application_client.boilerplate_command_sender import (
     BoilerplateCommandSender, CLA, InsType, Errors, MAX_APDU_LEN,
 )
 
+from application_client.transaction_helpers import (
+    SIGNING_CONTEXT, PK_LEN, SIG_LEN, get_public_key_chunks, get_signature_chunks,
+    _rlp_len, _rlp_bytes,
+)
+
 # In this tests we check the behavior of the device when asked to sign a transaction
-
-# ML-DSA-87 signing context: "ZOND" || version 0x01 || descriptor 01 00 00
-SIGNING_CONTEXT = bytes.fromhex("5a4f4e4401010000")
-PK_LEN = 2592
-SIG_LEN = 4627
-
-
-def get_public_key_chunks(backend: BackendInterface) -> bytes:
-    """Fetch the 2,592-byte ML-DSA-87 public key via chunked GET_PUBLIC_KEY."""
-    pk = b""
-    for p2 in range(1, 12):
-        r = backend.exchange(cla=CLA, ins=InsType.GET_PUBLIC_KEY, p1=0, p2=p2)
-        pk += r.data
-    return pk[:PK_LEN]
-
-
-def get_signature_chunks(backend: BackendInterface, first_chunk: bytes) -> bytes:
-    """Collect the remaining signature chunks after the auto-returned first."""
-    sig = bytearray(first_chunk)
-    for p2 in range(1, 18):
-        r = backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=2, p2=p2)
-        sig += r.data
-    return bytes(sig)[:SIG_LEN]
-
 
 # In this test we send to the device a transaction to sign and validate it on screen
 # The transaction is short and will be sent in one chunk
@@ -148,19 +129,6 @@ _TO = bytes.fromhex("b94f5374fce5edbc8e2a8697c15331677e6ebf0b" + "aa" * 44)
 _VALUE = bytes.fromhex("016345785d8a0000")
 _DESCRIPTOR = bytes.fromhex("010000")
 _REFERENCE_PREIMAGE = bytes.fromhex("02f86201038477359400850ba43b74008261a8b840b94f5374fce5edbc8e2a8697c15331677e6ebf0baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88016345785d8a000080c08301000080")
-
-
-def _rlp_len(base: int, n: int) -> bytes:
-    if n < 56:
-        return bytes([base + n])
-    length = n.to_bytes((n.bit_length() + 7) // 8, "big")
-    return bytes([base + 55 + len(length)]) + length
-
-
-def _rlp_bytes(b: bytes) -> bytes:
-    if len(b) == 1 and b[0] < 0x80:
-        return b
-    return _rlp_len(0x80, len(b)) + b
 
 
 def build_preimage(data: bytes, access_list: bytes = b"\xc0", to: bytes = _TO) -> bytes:

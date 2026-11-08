@@ -20,3 +20,6 @@ void validate_pubkey(bool choice);
  * @return true only after signing and signature self-verification succeed.
  */
 bool validate_transaction(bool choice);
+
+/** Sign and verify the reviewed personal-message digest; return true on success. */
+bool validate_personal_message(bool choice);
