@@ -23,6 +23,7 @@
 
 #include "types.h"
 #include "globals.h"
+#include "request_context.h"
 #include "io.h"
 #include "sw.h"
 #include "menu.h"
@@ -45,10 +46,10 @@ void app_main() {
      * left behind by a reset or power loss before accepting another request. */
     wipe_nvm_secrets();
 
-    ui_menu_main();
+    // Revoke the old request and any export flag left by a reset or power loss.
+    reset_request_context();
 
-    // Reset context
-    explicit_bzero(&G_context, sizeof(G_context));
+    ui_menu_main();
 
     // // Initialize the NVM data if required
     // if (N_storage.initialized != 0x01) {

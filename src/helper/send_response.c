@@ -39,7 +39,7 @@ int helper_send_response_address() {
 }
 
 int helper_send_response_sig(uint8_t index) {
-    if (index < 17) {
+    if (index < SIGNATURE_LAST_CHUNK_INDEX) {
         uint8_t resp[SIGNATURE_CHUNK_SIZE] = {0};
         size_t offset = 0;
 
@@ -64,7 +64,7 @@ int helper_send_response_sig(uint8_t index) {
     if (index == 0) {
         uint8_t temp = 1;
         nvm_write((void *) &N_storage.is_sending_signature, &temp, sizeof(uint8_t));
-    } else if (index == 17) {
+    } else if (index == SIGNATURE_LAST_CHUNK_INDEX) {
         uint8_t temp = 0;
         nvm_write((void *) &N_storage.is_sending_signature, &temp, sizeof(uint8_t));
     }

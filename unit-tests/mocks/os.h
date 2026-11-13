@@ -2,6 +2,8 @@
 #include "cx.h"
 #include "os_pic.h"
 
+#define PRINTF(...) ((void) 0)
+
 cx_err_t os_derive_bip32_no_throw(unsigned int curve,
                                   const uint32_t *path,
                                   size_t path_len,

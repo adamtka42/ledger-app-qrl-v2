@@ -28,6 +28,7 @@
 
 #include "get_public_key.h"
 #include "globals.h"
+#include "request_context.h"
 #include "types.h"
 #include "sw.h"
 #include "display.h"
@@ -35,7 +36,7 @@
 #include "address.h"
 
 int handler_get_public_key(buffer_t *cdata, bool display) {
-    explicit_bzero(&G_context, sizeof(G_context));
+    reset_request_context();
     G_context.req_type = CONFIRM_ADDRESS;
     G_context.state = STATE_NONE;
 

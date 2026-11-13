@@ -51,8 +51,14 @@
 #define CTX_LEN     8
 #define MESSAGE_LEN 500
 
-#define SIGNATURE_CHUNK_SIZE      258
-#define SIGNATURE_LAST_CHUNK_SIZE 241
+#define SIGNATURE_CHUNK_SIZE       258
+#define SIGNATURE_LAST_CHUNK_SIZE  241
+#define SIGNATURE_CHUNKS           18
+#define SIGNATURE_LAST_CHUNK_INDEX (SIGNATURE_CHUNKS - 1)
+
+_Static_assert(CRYPTO_BYTES ==
+                   SIGNATURE_LAST_CHUNK_INDEX * SIGNATURE_CHUNK_SIZE + SIGNATURE_LAST_CHUNK_SIZE,
+               "signature chunks must cover the signature exactly");
 
 #define PK_CHUNK_SIZE      258
 #define PK_LAST_CHUNK_SIZE 12

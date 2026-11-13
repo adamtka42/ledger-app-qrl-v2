@@ -28,6 +28,7 @@
 #include "address.h"
 #include "sw.h"
 #include "globals.h"
+#include "request_context.h"
 #include "display.h"
 #include "validate.h"
 #include "send_response.h"
@@ -36,94 +37,100 @@
 #include "dispatcher.h"  // DATA_FIRST, DATA_MORE, DATA_LAST
 
 static int abort_sign_tx(uint16_t sw) {
-    explicit_bzero(&G_context, sizeof(G_context));
+    reset_request_context();
     return io_send_sw(sw);
 }
 
-int handler_sign_tx(buffer_t *cdata, uint8_t p1, uint8_t p2) {
-    if ((p1 != DATA_FIRST && p1 != DATA_MORE && p1 != DATA_LAST) || p2 > 17) {
-        return abort_sign_tx(SW_WRONG_P1P2);
+// Open a session: the BIP32 path to sign with, before any transaction byte.
+static int start_sign_tx(buffer_t *cdata) {
+    reset_request_context();
+
+    if (!buffer_read_u8(cdata, &G_context.bip32_path_len) ||
+        !buffer_read_bip32_path(cdata, G_context.bip32_path, (size_t) G_context.bip32_path_len)) {
+        return abort_sign_tx(SW_WRONG_DATA_LENGTH);
     }
 
-    if (p1 == DATA_FIRST) {
-        explicit_bzero(&G_context, sizeof(G_context));
+    if (!is_valid_zond_bip32_path(G_context.bip32_path, (size_t) G_context.bip32_path_len)) {
+        return abort_sign_tx(SW_WRONG_DATA_LENGTH);
+    }
 
-        if (!buffer_read_u8(cdata, &G_context.bip32_path_len) ||
-            !buffer_read_bip32_path(cdata,
-                                    G_context.bip32_path,
-                                    (size_t) G_context.bip32_path_len)) {
-            return abort_sign_tx(SW_WRONG_DATA_LENGTH);
+    tx_stream_init(&G_context.tx_info.stream, &G_context.tx_info.tx_data);
+    keccak256_init(&G_context.tx_info.hash_ctx);
+    // A rejected first command must never leave a session that can continue.
+    G_context.req_type = CONFIRM_TRANSACTION;
+    G_context.state = STATE_RECEIVING;
+
+    return io_send_sw(SW_OK);
+}
+
+// Hash and parse one more part of the transaction; the last one opens the review.
+static int receive_tx_part(buffer_t *cdata, uint8_t p1) {
+    if (G_context.req_type != CONFIRM_TRANSACTION || G_context.state != STATE_RECEIVING) {
+        return abort_sign_tx(SW_BAD_STATE);
+    }
+    if (cdata->offset >= cdata->size) {
+        return abort_sign_tx(SW_WRONG_DATA_LENGTH);
+    }
+
+    const uint8_t *chunk = cdata->ptr + cdata->offset;
+    size_t chunk_len = cdata->size - cdata->offset;
+
+    // Every raw byte is part of the sighash preimage: the type byte, the
+    // RLP headers and the `data` / `access_list` bytes the parser skips.
+    keccak256_absorb(&G_context.tx_info.hash_ctx, chunk, chunk_len);
+
+    tx_stream_status_e status =
+        tx_stream_feed(&G_context.tx_info.stream, &G_context.tx_info.tx_data, chunk, chunk_len);
+    if (status == TX_STREAM_ERROR) {
+        return abort_sign_tx(SW_TX_PARSING_FAIL);
+    }
+
+    if (p1 == DATA_MORE) {
+        if (status == TX_STREAM_FINISHED) {
+            // the outer list is already closed but the host announces more data
+            return abort_sign_tx(SW_TX_PARSING_FAIL);
         }
-
-        if (!is_valid_zond_bip32_path(G_context.bip32_path, (size_t) G_context.bip32_path_len)) {
-            return abort_sign_tx(SW_WRONG_DATA_LENGTH);
-        }
-
-        tx_stream_init(&G_context.tx_info.stream, &G_context.tx_info.tx_data);
-        keccak256_init(&G_context.tx_info.hash_ctx);
-        // A rejected first command must never leave a session that can continue.
-        G_context.req_type = CONFIRM_TRANSACTION;
-        G_context.state = STATE_RECEIVING;
-
+        // more APDUs with transaction parts are expected
         return io_send_sw(SW_OK);
     }
 
-    if (p1 == DATA_MORE || (p1 == DATA_LAST && p2 == 0)) {
-        if (G_context.req_type != CONFIRM_TRANSACTION || G_context.state != STATE_RECEIVING) {
-            return abort_sign_tx(SW_BAD_STATE);
-        }
-        if (cdata->offset >= cdata->size) {
-            return abort_sign_tx(SW_WRONG_DATA_LENGTH);
-        }
-
-        const uint8_t *chunk = cdata->ptr + cdata->offset;
-        size_t chunk_len = cdata->size - cdata->offset;
-
-        // Every raw byte is part of the sighash preimage: the type byte, the
-        // RLP headers and the `data` / `access_list` bytes the parser skips.
-        keccak256_absorb(&G_context.tx_info.hash_ctx, chunk, chunk_len);
-
-        tx_stream_status_e status =
-            tx_stream_feed(&G_context.tx_info.stream, &G_context.tx_info.tx_data, chunk, chunk_len);
-        if (status == TX_STREAM_ERROR) {
-            return abort_sign_tx(SW_TX_PARSING_FAIL);
-        }
-
-        if (p1 == DATA_MORE) {
-            if (status == TX_STREAM_FINISHED) {
-                // the outer list is already closed but the host announces more data
-                return abort_sign_tx(SW_TX_PARSING_FAIL);
-            }
-            // more APDUs with transaction parts are expected
-            return io_send_sw(SW_OK);
-        }
-
-        // last APDU for this transaction
-        if (status != TX_STREAM_FINISHED) {
-            return abort_sign_tx(SW_TX_PARSING_FAIL);  // truncated transaction
-        }
-        keccak256_finalize(&G_context.tx_info.hash_ctx);
-        keccak256_squeeze(&G_context.tx_info.hash_ctx, G_context.tx_info.m_hash);
-        keccak256_clear(&G_context.tx_info.hash_ctx);
-        G_context.state = STATE_PARSED;
-
-        zond_tx_t *tx = &G_context.tx_info.tx_data;
-        bool blind = tx->has_data || tx->has_access_list;
-        if (blind && !N_storage.enable_blind_signing) {
-            return abort_sign_tx(SW_DENY);
-        }
-        return ui_display_transaction_bs_choice(blind, tx);
+    // last APDU for this transaction
+    if (status != TX_STREAM_FINISHED) {
+        return abort_sign_tx(SW_TX_PARSING_FAIL);  // truncated transaction
     }
+    keccak256_finalize(&G_context.tx_info.hash_ctx);
+    keccak256_squeeze(&G_context.tx_info.hash_ctx, G_context.tx_info.m_hash);
+    keccak256_clear(&G_context.tx_info.hash_ctx);
+    G_context.state = STATE_PARSED;
 
-    if (p1 == DATA_LAST && p2 > 0 && p2 < 18) {
-        if (G_context.req_type != CONFIRM_TRANSACTION) {
-            return io_send_sw(SW_BAD_STATE);
-        }
-        if (N_storage.is_sending_signature) {
-            return helper_send_response_sig(p2);
-        }
+    zond_tx_t *tx = &G_context.tx_info.tx_data;
+    bool blind = tx->has_data || tx->has_access_list;
+    if (blind && !N_storage.enable_blind_signing) {
+        return abort_sign_tx(SW_DENY);
+    }
+    return ui_display_transaction_bs_choice(blind, tx);
+}
+
+// Export needs the session this transaction approved. Any other request is refused
+// without ending that session, so a stray APDU cannot cut an export short.
+static bool signature_export_authorized(void) {
+    return G_context.req_type == CONFIRM_TRANSACTION && G_context.state == STATE_APPROVED &&
+           N_storage.is_sending_signature;
+}
+
+static int export_signature_chunk(buffer_t *cdata, uint8_t p2) {
+    if (!signature_export_authorized()) {
         return io_send_sw(SW_BAD_STATE);
     }
+    if (cdata->offset != cdata->size) {
+        return abort_sign_tx(SW_WRONG_DATA_LENGTH);
+    }
+    return helper_send_response_sig(p2);
+}
 
-    return abort_sign_tx(SW_WRONG_P1P2);
+int handler_sign_tx(buffer_t *cdata, uint8_t p1, uint8_t p2) {
+    if (!sign_command_p1p2_valid(p1, p2)) return abort_sign_tx(SW_WRONG_P1P2);
+    if (p2 != 0) return export_signature_chunk(cdata, p2);
+    if (p1 == DATA_FIRST) return start_sign_tx(cdata);
+    return receive_tx_part(cdata, p1);
 }
