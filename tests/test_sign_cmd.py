@@ -391,8 +391,13 @@ def test_failed_sign_start_invalidates_previous_session(
     (0x02, 0, b"", Errors.SW_WRONG_DATA_LENGTH),
     (0x03, 0, b"\x02", Errors.SW_WRONG_P1P2),
     (0x01, 18, b"\x02", Errors.SW_WRONG_P1P2),
+    (0x00, 1, b"\x02", Errors.SW_WRONG_P1P2),
+    (0x00, 17, b"\x02", Errors.SW_WRONG_P1P2),
+    (0x01, 1, b"\x02", Errors.SW_WRONG_P1P2),
+    (0x01, 17, b"\x02", Errors.SW_WRONG_P1P2),
 ], ids=["malformed", "truncated", "finished_before_last", "blind_signing_disabled",
-        "empty_more", "empty_last", "invalid_p1", "invalid_p2"])
+        "empty_more", "empty_last", "invalid_p1", "invalid_p2",
+        "first_with_chunk_1", "first_with_chunk_17", "more_with_chunk_1", "more_with_chunk_17"])
 @pytest.mark.parametrize("p1", [0x01, 0x02], ids=["more", "last"])
 def test_failed_sign_stream_cannot_continue(
     backend: BackendInterface, bad_p1: int, bad_p2: int, transaction: bytes, status: Errors, p1: int
@@ -408,6 +413,58 @@ def test_failed_sign_stream_cannot_continue(
                          data=_REFERENCE_PREIMAGE[:1])
     assert exc.value.status == Errors.SW_BAD_STATE
     assert not exc.value.data
+
+
+def test_new_transaction_cannot_export_previous_signature(
+    backend: BackendInterface, scenario_navigator: NavigateWithScenario
+) -> None:
+    """An unfinished export must not authorize the next receiving session."""
+    client = BoilerplateCommandSender(backend)
+    path = "m/44'/238'/0'/0/0"
+    client.get_public_key(path=path)
+    public_key = get_public_key_chunks(backend)
+    with client.sign_tx(path=path, transaction=_REFERENCE_PREIMAGE):
+        scenario_navigator.review_approve(do_comparison=False)
+    assert len(client.get_async_response().data) == 258
+    # Leave chunks 1..17 unread, so the persistent export flag remains set.
+    backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=0, p2=0,
+                     data=pack_derivation_path(path))
+    transaction = build_preimage(b"", to=bytes.fromhex("11" * 64))
+    for receiving_data in (False, True):
+        if receiving_data:
+            backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=1, p2=0,
+                             data=transaction[:1])
+        for p2 in range(1, 18):
+            with pytest.raises(ExceptionRAPDU) as exc:
+                backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=2, p2=p2)
+            assert exc.value.status == Errors.SW_BAD_STATE
+            assert not exc.value.data
+    # Refused exports do not discard the valid stream or release the old signature.
+    with backend.exchange_async(cla=CLA, ins=InsType.SIGN_TX, p1=2, p2=0,
+                                data=transaction[1:]):
+        scenario_navigator.review_approve(do_comparison=False)
+    signature = get_signature_chunks(backend, client.get_async_response().data)
+    digest = keccak.new(digest_bits=256, data=transaction).digest()
+    assert ML_DSA_87.verify(public_key, digest, signature, ctx=SIGNING_CONTEXT)
+    with pytest.raises(ExceptionRAPDU) as exc:
+        backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=2, p2=1)
+    assert exc.value.status == Errors.SW_BAD_STATE
+
+
+def test_signature_export_rejects_payload_and_discards_session(
+    backend: BackendInterface, scenario_navigator: NavigateWithScenario
+) -> None:
+    client = BoilerplateCommandSender(backend)
+    with client.sign_tx(path="m/44'/238'/0'/0/0", transaction=_REFERENCE_PREIMAGE):
+        scenario_navigator.review_approve(do_comparison=False)
+    with pytest.raises(ExceptionRAPDU) as exc:
+        backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=2, p2=1, data=b"\x00")
+    assert exc.value.status == Errors.SW_WRONG_DATA_LENGTH
+    for p2 in (1, 17):
+        with pytest.raises(ExceptionRAPDU) as exc:
+            backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=2, p2=p2)
+        assert exc.value.status == Errors.SW_BAD_STATE
+        assert not exc.value.data
 
 
 def test_valid_sign_session_after_rejected_path(

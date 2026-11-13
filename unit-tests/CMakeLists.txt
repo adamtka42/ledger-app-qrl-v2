@@ -66,6 +66,26 @@ add_library(tx_stream ../src/tx_stream.c)
 target_link_libraries(test_tx_stream PUBLIC tx_stream cmocka gcov)
 add_test(test_tx_stream test_tx_stream)
 
+add_executable(test_validate_transaction
+    test_validate_transaction.c
+    ../src/ui/action/validate.c
+    ../src/helper/request_context.c)
+target_include_directories(test_validate_transaction BEFORE PRIVATE mocks ../src/helper ../src/ui/action)
+target_link_libraries(test_validate_transaction PRIVATE cmocka gcov)
+add_test(test_validate_transaction test_validate_transaction)
+
+add_executable(test_transaction_review
+    test_transaction_review.c
+    ../src/ui/nbgl_display_transaction.c
+    ../src/ui/action/validate.c
+    ../src/helper/request_context.c)
+target_include_directories(test_transaction_review BEFORE PRIVATE mocks ../src/helper ../src/ui/action)
+target_compile_definitions(test_transaction_review PRIVATE TARGET_FLEX SCREEN_SIZE_WALLET)
+set_property(TARGET test_transaction_review APPEND_STRING PROPERTY LINK_FLAGS
+    " -Wl,--wrap=format_checksummed_address,--wrap=format_qrl_amount,--wrap=multiply_uint8_arrays,--wrap=uint8_array_to_decimal")
+target_link_libraries(test_transaction_review PRIVATE tx_format address_format hashes cmocka gcov)
+add_test(test_transaction_review test_transaction_review)
+
 # Exercise real crypto code with mocked Ledger syscalls and observed erasure.
 add_executable(test_crypto_cleanup
     test_crypto_cleanup.c

@@ -51,5 +51,5 @@ void keccak256_squeeze(keccak256_ctx *ctx, uint8_t *out) {
 }
 
 void keccak256_clear(keccak256_ctx *ctx) {
-    MEMSET(ctx, 0, sizeof(*ctx));
+    explicit_bzero(ctx, sizeof(*ctx));
 }
