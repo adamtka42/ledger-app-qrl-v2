@@ -108,7 +108,19 @@ target_compile_definitions(test_personal_message_review_nano PRIVATE TARGET_NANO
 target_link_libraries(test_personal_message_review_nano PRIVATE personal_message address_format hashes cmocka gcov)
 add_test(test_personal_message_review_nano test_personal_message_review_nano)
 
+add_library(typed_data ../src/typed_data.c)
+add_executable(test_typed_data test_typed_data.c)
+target_compile_definitions(test_typed_data PRIVATE
+    TYPED_DATA_VECTOR_FILE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/typed_data.txt")
+target_link_libraries(test_typed_data PUBLIC typed_data address_format hashes cmocka gcov)
+add_test(test_typed_data test_typed_data)
 
+add_executable(test_typed_storage test_typed_storage.c ../src/typed_data_storage.c)
+target_include_directories(test_typed_storage BEFORE PRIVATE mocks)
+target_compile_definitions(test_typed_storage PRIVATE
+    TYPED_DATA_VECTOR_FILE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/typed_data.txt")
+target_link_libraries(test_typed_storage PUBLIC typed_data address_format hashes cmocka gcov)
+add_test(test_typed_storage test_typed_storage)
 
 # Exercise real crypto code with mocked Ledger syscalls and observed erasure.
 add_executable(test_crypto_cleanup
@@ -132,3 +144,7 @@ set_property(TARGET test_crypto_cleanup APPEND_STRING PROPERTY LINK_FLAGS
     " -Wl,--wrap=shake256_absorb,--wrap=shake256_squeeze,--wrap=poly_vec_l_uniform_eta,--wrap=poly_vec_k_uniform_eta,--wrap=poly_vec_l_chk_norm")
 target_link_libraries(test_crypto_cleanup PRIVATE cmocka gcov)
 add_test(test_crypto_cleanup test_crypto_cleanup)
+
+# These transaction-only callback tests have no staged typed-data storage.
+target_sources(test_validate_transaction PRIVATE mocks/typed_data_storage.c)
+target_sources(test_transaction_review PRIVATE mocks/typed_data_storage.c)

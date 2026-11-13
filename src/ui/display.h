@@ -29,6 +29,9 @@ int ui_display_address(void);
 /** Display the account, byte length and all personal-message text for approval. */
 int ui_display_personal_message(void);
 
+/** Display all QRL typed-data fields and domain context before signing. */
+int ui_display_typed_data(void);
+
 /**
  * Display transaction information on the device and ask confirmation to sign.
  *

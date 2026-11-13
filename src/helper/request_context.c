@@ -5,6 +5,7 @@
 #include "os.h"
 #include "os_nvm.h"
 #include "globals.h"
+#include "typed_data_storage.h"
 
 void reset_request_context(void) {
     /* Revoke RAM authorization before touching persistent state. */
@@ -13,4 +14,5 @@ void reset_request_context(void) {
         uint8_t inactive = 0;
         nvm_write((void *) &N_storage.is_sending_signature, &inactive, sizeof(inactive));
     }
+    typed_data_storage_clear();
 }

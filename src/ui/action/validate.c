@@ -109,3 +109,17 @@ bool validate_personal_message(bool choice) {
     helper_send_response_sig(0);
     return true;
 }
+
+bool validate_typed_data(bool choice) {
+    if (G_context.req_type != CONFIRM_TYPED_DATA || G_context.state != STATE_PARSED) {
+        return reject_request(SW_BAD_STATE);
+    }
+    if (!choice) return reject_request(SW_DENY);
+    int result = crypto_sign_digest(G_context.typed_data.digest);
+    typed_data_storage_clear();
+    explicit_bzero(&G_context.typed_data, sizeof(G_context.typed_data));
+    if (result != 0) return reject_request(SW_SIGNATURE_FAIL);
+    G_context.state = STATE_APPROVED;
+    helper_send_response_sig(0);
+    return true;
+}

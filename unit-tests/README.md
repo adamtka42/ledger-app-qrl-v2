@@ -55,6 +55,15 @@ fragments, including the empty message and maximum newline count. Device tests
 in `tests/test_personal_message_cmd.py` additionally cover approval/rejection,
 ML-DSA verification, malformed APDUs and isolation from transaction sessions.
 
+`test_typed_data` checks QRL VM64 typed-data digests against the fixtures in
+`fixtures/typed_data.txt`, cross-checked with go-qrl's `TypedDataAndHash`.
+It covers nested structs, arrays, 512-bit integers, empty/long values, all
+streaming split positions, truncation, trailing bytes and canonical values.
+`tests/test_typed_data_cmd.py` additionally checks UI, signatures, malformed
+schemas, review limits and isolation from transaction/personal-message sessions.
+`test_typed_storage` observes NVM writes and checks raw-payload erasure, review
+erasure, replacement/startup cleanup, and retry after interrupted erasure.
+
 ## Generate code coverage
 
 Just execute in `unit-tests` folder

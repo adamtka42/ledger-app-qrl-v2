@@ -30,9 +30,11 @@ class InsType(IntEnum):
     GET_PUBLIC_KEY = 0x05
     SIGN_TX        = 0x06
     SIGN_PERSONAL_MESSAGE = 0x08
+    SIGN_TYPED_DATA = 0x0C
 
 class Errors(IntEnum):
     SW_MESSAGE_INVALID         = 0x6A80
+    SW_TYPED_DATA_INVALID      = 0x6A80
     SW_DENY                    = 0x6985
     SW_WRONG_P1P2              = 0x6A86
     SW_WRONG_DATA_LENGTH       = 0x6A87
@@ -126,6 +128,20 @@ class BoilerplateCommandSender:
 
     def get_async_response(self) -> Optional[RAPDU]:
         return self.backend.last_async_response
+
+    @contextmanager
+    def sign_typed_data(self, path: str, payload: bytes) -> Generator[None, None, None]:
+        """Send a QRL schema-and-values payload; review happens on the final APDU."""
+        self.backend.exchange(cla=CLA, ins=InsType.SIGN_TYPED_DATA, p1=0, p2=0,
+                              data=pack_derivation_path(path) + len(payload).to_bytes(4, "big"))
+        chunks = split_message(payload, MAX_APDU_LEN)
+        if not chunks:
+            raise ValueError("Typed data requires a nonempty schema-and-values payload")
+        for chunk in chunks[:-1]:
+            self.backend.exchange(cla=CLA, ins=InsType.SIGN_TYPED_DATA, p1=1, p2=0, data=chunk)
+        with self.backend.exchange_async(cla=CLA, ins=InsType.SIGN_TYPED_DATA,
+                                          p1=2, p2=0, data=chunks[-1]) as response:
+            yield response
 
     @contextmanager
     def sign_personal_message(self, path: str, message: bytes) -> Generator[None, None, None]:

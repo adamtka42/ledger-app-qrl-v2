@@ -9,6 +9,10 @@
  */
 #define SW_MESSAGE_INVALID 0x6A80
 /**
+ * Status word for malformed or unsupported QRL typed-data schemas or values.
+ */
+#define SW_TYPED_DATA_INVALID SW_MESSAGE_INVALID /* the same status on purpose */
+/**
  * Status word for denied by user.
  */
 #define SW_DENY 0x6985
