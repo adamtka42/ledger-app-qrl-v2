@@ -16,6 +16,7 @@
  *****************************************************************************/
 
 #include <stdbool.h>  // bool
+#include <stdio.h>    // snprintf
 #include <string.h>   // memset
 
 #include "os.h"
@@ -29,6 +30,7 @@
 #include "display.h"
 #include "constants.h"
 #include "globals.h"
+#include "request_context.h"
 #include "sw.h"
 #include "tx_format.h"
 #include "validate.h"
@@ -48,6 +50,12 @@ static char g_tx_hash[65];
 static nbgl_contentTagValue_t pairs[9];
 static nbgl_contentTagValueList_t pairList;
 
+static int abort_display(uint16_t status) {
+    reset_request_context();
+    ui_menu_main();
+    return io_send_sw(status);
+}
+
 static void bytes_to_lower_hex(const uint8_t *bytes, size_t len, char *out) {
     static const char hex[] = "0123456789abcdef";
     for (size_t i = 0; i < len; i++) {
@@ -65,10 +73,13 @@ static void review_choice(bool confirm) {
     // (rejection only sends SW_DENY), which made the screen count racy.
     if (confirm) {
         nbgl_useCaseSpinner("Signing");
-        validate_transaction(confirm);
-        nbgl_useCaseReviewStatus(STATUS_TYPE_TRANSACTION_SIGNED, ui_menu_main);
+        if (validate_transaction(true)) {
+            nbgl_useCaseReviewStatus(STATUS_TYPE_TRANSACTION_SIGNED, ui_menu_main);
+        } else {
+            nbgl_useCaseStatus("Transaction signing failed", false, ui_menu_main);
+        }
     } else {
-        validate_transaction(confirm);
+        validate_transaction(false);
         nbgl_useCaseReviewStatus(STATUS_TYPE_TRANSACTION_REJECTED, ui_menu_main);
     }
 }
@@ -112,8 +123,7 @@ void print_tx_utils(zond_tx_t *tx) {
 // - Display a warning if the transaction is blind-signed
 int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     if (G_context.req_type != CONFIRM_TRANSACTION || G_context.state != STATE_PARSED) {
-        G_context.state = STATE_NONE;
-        return io_send_sw(SW_BAD_STATE);
+        return abort_display(SW_BAD_STATE);
     }
     const bool is_contract_creation = (tx->to_len == 0);
 
@@ -124,7 +134,7 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     cx_err_t error =
         address_from_bip32_path(G_context.bip32_path, G_context.bip32_path_len, G_context.address);
     if (error != CX_OK) {
-        return io_send_sw(SW_DISPLAY_ADDRESS_FAIL);
+        return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
     PRINTF("DERIVE ADDRESS END\n");
     PRINTF("from ");
@@ -136,13 +146,13 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     // Format from address
     memset(g_from_address, 0, sizeof(g_from_address));
     if (!format_checksummed_address(G_context.address, g_from_address, sizeof(g_from_address))) {
-        return io_send_sw(SW_DISPLAY_ADDRESS_FAIL);
+        return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
 
     // Format amount
     char amount[TX_FORMAT_MAX_AMOUNT_LEN] = {0};
     if (!format_qrl_amount(tx->value, tx->value_len, amount, sizeof(amount)))
-        return io_send_sw(SW_DISPLAY_AMOUNT_FAIL);
+        return abort_display(SW_DISPLAY_AMOUNT_FAIL);
     PRINTF("amount %s\n", amount);
     memset(g_amount, 0, sizeof(g_amount));
     snprintf(g_amount, sizeof(g_amount), "QRL %s", amount);
@@ -151,7 +161,7 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     memset(g_to_address, 0, sizeof(g_to_address));
     if (!is_contract_creation &&
         !format_checksummed_address(tx->to, g_to_address, sizeof(g_to_address))) {
-        return io_send_sw(SW_DISPLAY_ADDRESS_FAIL);
+        return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
     PRINTF("to %s\n", g_to_address);
 
@@ -166,7 +176,7 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
                                fee_product,
                                &fee_product_len) ||
         !format_qrl_amount(fee_product, fee_product_len, max_fees, sizeof(max_fees)))
-        return io_send_sw(SW_DISPLAY_AMOUNT_FAIL);
+        return abort_display(SW_DISPLAY_AMOUNT_FAIL);
     PRINTF("max fees %s\n", max_fees);
     memset(g_max_fees, 0, sizeof(g_max_fees));
     snprintf(g_max_fees, sizeof(g_max_fees), "QRL %s", max_fees);
@@ -175,7 +185,7 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     if (!uint8_array_to_decimal(tx->chain_id, tx->chain_id_len, g_chain_id, sizeof(g_chain_id)) ||
         !uint8_array_to_decimal(tx->gas, tx->gas_len, g_gas_limit, sizeof(g_gas_limit)) ||
         !format_qrl_amount(tx->gas_tip_cap, tx->gas_tip_cap_len, amount, sizeof(amount)))
-        return io_send_sw(SW_DISPLAY_AMOUNT_FAIL);
+        return abort_display(SW_DISPLAY_AMOUNT_FAIL);
     snprintf(g_gas_tip_cap, sizeof(g_gas_tip_cap), "QRL %s", amount);
 
     size_t count = 0;
@@ -197,7 +207,7 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     ADD_PAIR("Max fees", g_max_fees);
     if (N_storage.display_nonce) {
         if (!uint8_array_to_decimal(tx->nonce, tx->nonce_len, g_nonce, sizeof(g_nonce)))
-            return io_send_sw(SW_DISPLAY_AMOUNT_FAIL);
+            return abort_display(SW_DISPLAY_AMOUNT_FAIL);
         ADD_PAIR("Nonce", g_nonce);
     }
     if (N_storage.display_tx_hash) {

@@ -41,6 +41,12 @@ parsing. The transaction is parsed and hashed chunk by chunk as the APDUs
 arrive (`src/tx_stream.c`), so there is no fixed size limit; only a sanity cap
 of `TX_MAX_TOTAL_LEN` (64 KiB, `src/tx_types.h`) applies.
 
+The recipient length is retained for review: an empty `to` is displayed as
+`Operation: Create contract`, while a 64-byte all-zero `to` remains a recipient
+address and is displayed under `To`. Non-empty `data` (including contract
+initialization bytecode) or a non-empty access list still requires blind signing
+to be enabled and the corresponding warning to be acknowledged.
+
 The full on-chain transaction appends `signature` (4,627 bytes) and
 `public_key` (2,592 bytes) after `extra_params`; the device never receives or
 parses that signed envelope; assembling it is the host's job.

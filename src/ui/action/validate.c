@@ -16,6 +16,7 @@
  *****************************************************************************/
 
 #include <stdbool.h>  // bool
+#include <string.h>
 
 #include "crypto_helpers.h"
 
@@ -23,6 +24,7 @@
 #include "menu.h"
 #include "sw.h"
 #include "globals.h"
+#include "request_context.h"
 #include "send_response.h"
 #include "sign.h"
 #include "keccak256.h"
@@ -78,18 +80,24 @@ static int crypto_sign_message(void) {
     return 0;
 }
 
-void validate_transaction(bool choice) {
-    if (choice) {
-        G_context.state = STATE_APPROVED;
-
-        if (crypto_sign_message() != 0) {
-            G_context.state = STATE_NONE;
-            io_send_sw(SW_SIGNATURE_FAIL);
-        } else {
-            helper_send_response_sig(0);
-        }
-    } else {
-        G_context.state = STATE_NONE;
-        io_send_sw(SW_DENY);
+bool validate_transaction(bool choice) {
+    if (G_context.req_type != CONFIRM_TRANSACTION || G_context.state != STATE_PARSED) {
+        reset_request_context();
+        io_send_sw(SW_BAD_STATE);
+        return false;
     }
+    if (!choice) {
+        reset_request_context();
+        io_send_sw(SW_DENY);
+        return false;
+    }
+    if (crypto_sign_message() != 0) {
+        reset_request_context();
+        io_send_sw(SW_SIGNATURE_FAIL);
+        return false;
+    }
+    // Export is authorized only after signing and self-verification succeed.
+    G_context.state = STATE_APPROVED;
+    helper_send_response_sig(0);
+    return true;
 }

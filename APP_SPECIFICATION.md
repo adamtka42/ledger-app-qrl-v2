@@ -63,6 +63,19 @@ host must send a new first block before retrying; continuing a discarded session
 returns `SW_BAD_STATE` (`B007`). A new first block also replaces any previous
 signing session, including when the new path is empty or malformed.
 
+First and continuation blocks (`P1=00/01`) require `P2=00`. Signature export
+uses `P1=02, P2=01..11` (hexadecimal) with an empty payload and is authorized
+only for the current approved transaction after successful signature
+self-verification. An unfinished export from a previous request does not
+authorize a new receiving session. Rejected or failed signing requests are
+discarded before returning their status word.
+
+Resetting a request also clears the persistent signature-export flag. This
+happens on app startup, when a new signing or public-key request replaces the
+old session, and when a signing request fails or is rejected. An already clear
+flag is not written again, avoiding unnecessary NVM writes. Session-state
+checks remain mandatory independently of this flag.
+
 The input data is the RLP encoded transaction streamed to the device in 255 bytes maximum data chunks. The device parses and hashes the transaction incrementally as the chunks arrive, so there is no fixed maximum transaction size (only a 64 KiB sanity cap applies).
 
 As the signature size exceeds maximum APDU response length, responses will be chunked with max size of 258 bytes each. The main app should request each chunk manually with index from 0-17, where the first chunk will be automatically returned after the last transaction data is sent and the signature is computed.
@@ -73,9 +86,10 @@ As the signature size exceeds maximum APDU response length, responses will be ch
 
 | CLA | INS  | P1                   | P2                               | Lc       |
 | --- | ---  | ---                  | ---                              | ---      |
-| E0  | 06   |  00 : first data (BIP32 path) | 00 | variable |
-|     |      |  01 : more tx data                  | 01-17 : request more signature chunk | variable   |
-|     |      |  02 : last tx data                  | |   |
+| E0  | 06   | 00 : first data (BIP32 path) | 00 | variable |
+| E0  | 06   | 01 : more tx data | 00 | variable |
+| E0  | 06   | 02 : last tx data | 00 | variable |
+| E0  | 06   | 02 : retrieve signature chunk | 01..11 (hex, chunks 1..17) | 00 |
 
 ##### `Input data (first transaction data block)`
 

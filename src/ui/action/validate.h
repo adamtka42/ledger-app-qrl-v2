@@ -15,7 +15,8 @@ void validate_pubkey(bool choice);
  * Action for transaction information validation.
  *
  * @param[in] choice
- *   User choice (either approved or rejectd).
+ *   User choice (either approved or rejected).
  *
+ * @return true only after signing and signature self-verification succeed.
  */
-void validate_transaction(bool choice);
+bool validate_transaction(bool choice);

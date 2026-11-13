@@ -28,6 +28,7 @@
 #include "address.h"
 #include "sw.h"
 #include "globals.h"
+#include "request_context.h"
 #include "display.h"
 #include "validate.h"
 #include "send_response.h"
@@ -36,17 +37,18 @@
 #include "dispatcher.h"  // DATA_FIRST, DATA_MORE, DATA_LAST
 
 static int abort_sign_tx(uint16_t sw) {
-    explicit_bzero(&G_context, sizeof(G_context));
+    reset_request_context();
     return io_send_sw(sw);
 }
 
 int handler_sign_tx(buffer_t *cdata, uint8_t p1, uint8_t p2) {
-    if ((p1 != DATA_FIRST && p1 != DATA_MORE && p1 != DATA_LAST) || p2 > 17) {
+    if ((p1 != DATA_FIRST && p1 != DATA_MORE && p1 != DATA_LAST) || p2 > 17 ||
+        (p1 != DATA_LAST && p2 != 0)) {
         return abort_sign_tx(SW_WRONG_P1P2);
     }
 
     if (p1 == DATA_FIRST) {
-        explicit_bzero(&G_context, sizeof(G_context));
+        reset_request_context();
 
         if (!buffer_read_u8(cdata, &G_context.bip32_path_len) ||
             !buffer_read_bip32_path(cdata,
@@ -116,13 +118,14 @@ int handler_sign_tx(buffer_t *cdata, uint8_t p1, uint8_t p2) {
     }
 
     if (p1 == DATA_LAST && p2 > 0 && p2 < 18) {
-        if (G_context.req_type != CONFIRM_TRANSACTION) {
+        if (G_context.req_type != CONFIRM_TRANSACTION || G_context.state != STATE_APPROVED ||
+            !N_storage.is_sending_signature) {
             return io_send_sw(SW_BAD_STATE);
         }
-        if (N_storage.is_sending_signature) {
-            return helper_send_response_sig(p2);
+        if (cdata->offset != cdata->size) {
+            return abort_sign_tx(SW_WRONG_DATA_LENGTH);
         }
-        return io_send_sw(SW_BAD_STATE);
+        return helper_send_response_sig(p2);
     }
 
     return abort_sign_tx(SW_WRONG_P1P2);
