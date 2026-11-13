@@ -32,6 +32,7 @@
 #include "get_public_key.h"
 #include "sign_tx.h"
 #include "sign_personal_message.h"
+#include "sign_typed_data.h"
 
 int apdu_dispatcher(const command_t *cmd) {
     LEDGER_ASSERT(cmd != NULL, "NULL cmd");
@@ -76,6 +77,11 @@ int apdu_dispatcher(const command_t *cmd) {
             buf.offset = 0;
 
             return handler_get_public_key(&buf, (bool) cmd->p1);
+        case SIGN_TYPED_DATA:
+            buf.ptr = cmd->data;
+            buf.size = cmd->lc;
+            buf.offset = 0;
+            return handler_sign_typed_data(&buf, cmd->p1, cmd->p2);
         case SIGN_PERSONAL_MESSAGE:
             buf.ptr = cmd->data;
             buf.size = cmd->lc;

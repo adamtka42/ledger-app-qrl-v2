@@ -122,3 +122,27 @@ bool validate_personal_message(bool choice) {
     helper_send_response_sig(0);
     return true;
 }
+
+bool validate_typed_data(bool choice) {
+    if (G_context.req_type != CONFIRM_TYPED_DATA || G_context.state != STATE_PARSED) {
+        reset_request_context();
+        io_send_sw(SW_BAD_STATE);
+        return false;
+    }
+    if (!choice) {
+        reset_request_context();
+        io_send_sw(SW_DENY);
+        return false;
+    }
+    int result = crypto_sign_digest(G_context.typed_data.digest);
+    typed_data_storage_clear();
+    explicit_bzero(&G_context.typed_data, sizeof(G_context.typed_data));
+    if (result != 0) {
+        reset_request_context();
+        io_send_sw(SW_SIGNATURE_FAIL);
+        return false;
+    }
+    G_context.state = STATE_APPROVED;
+    helper_send_response_sig(0);
+    return true;
+}

@@ -9,6 +9,7 @@ The application covers the following functionalities :
 - Get a public QRL v2.0 address given a BIP 32 path
 - Sign a QRL v2.0 transaction given a BIP 32 path and RLP encoded transaction data
 - Sign a readable personal message using the QRL signed-message format
+- Sign QRL Typed Structured Data v1 with a full on-device field review
 - Retrieve the QRL v2.0 app version
 - Retrieve the QRL v2.0 app name
 
@@ -225,6 +226,127 @@ Use `--message`, `--message-file`, `--dry-run`, or `--output /tmp/message.json`.
 The JSON output contains public verification data only. Wallets must integrate
 this APDU sequence and verify signatures against the QRL message digest.
 
+### SIGN TYPED DATA — QRL Typed Structured Data v1
+
+`CLA=E0`, `INS=0C` signs structured data compatible with the local go-qrl
+`signer/core/apitypes.TypedDataAndHash` format. It is an independent signing
+session and does not require blind signing. The host supplies definitions and
+values, never a trusted hash or a separate display description.
+
+#### APDU sequence
+
+1. `P1=00, P2=00`: canonical QRL BIP32 path followed by a four-byte big-endian
+   payload length. The first command contains no payload bytes.
+2. `P1=01, P2=00`: nonempty intermediate payload fragments, up to 255 bytes each.
+3. `P1=02, P2=00`: nonempty final fragment. The device requires exactly the
+   declared length, validates all definitions/values, computes the hash, and
+   starts review. No signature is returned before user approval.
+4. Approval returns signature fragment 0. Request fragments 1 through 17 using
+   `INS=0C, P1=02, P2=01..11` (hex) and empty command data. The complete
+   ML-DSA-87 signature is 4627 bytes, with the existing context `5a4f4e4401010000`.
+
+Signature export is restricted to the approved typed-data session. Starting a
+new message/transaction or deriving an address invalidates the previous session.
+Malformed data aborts the session; there is no blind or hash-only fallback.
+Typed-data payloads and review text are staged temporarily in NVM to preserve
+the ML-DSA stack budget. Raw payloads are erased after parsing; review data is
+erased on approval, rejection, abort, or a replacement signing/address request. An active marker is
+cleared last so interrupted erasure is retried on the next app startup. NBGL
+descriptors are staged in the same temporary area and erased with the review. Invalid syntax/unsupported profiles return `6A80`; transport lengths
+return `6A87`, parameters `6A86`, and invalid session state `B007`.
+
+#### Payload, version 1
+
+All lengths below count bytes, not characters. All multibyte wire integers are
+big-endian. The entire payload is capped at 4096 bytes.
+
+```
+version:             u8 = 1
+type_count:          u8
+primary_type_index:  u8 (zero-based position in the definitions below)
+repeat type_count times:
+    type_name:       u8 length + ASCII identifier
+    field_count:     u8
+    repeat field_count times, in declared order:
+        field_name:  u8 length + ASCII identifier
+        field_type:  u8 length + ASCII type name (optionally suffixed with [])
+domain_values:       values of QRLTypedDataDomain, in schema order
+message_values:      values of primary_type_index, in schema order
+```
+
+The schema must contain `QRLTypedDataDomain` and a separate primary type.
+Type and field identifiers match `[A-Za-z_][A-Za-z0-9_]*`, up to 24 bytes;
+duplicate types/fields, primitive-name shadowing, unknown references and cycles
+are rejected. Definitions may be transmitted in any order; dependency names
+are sorted when calculating each type hash.
+
+The domain accepts a nonempty ordered subset of `name:string`, `version:string`,
+`chainId:uint256`, `verifyingContract:address`, and `salt:bytes32` in that order.
+Empty domain name/version values are rejected, matching go-qrl's omission rules.
+Missing chain ID or verifying contract is explicitly shown as `Not specified`.
+
+| Value type | Wire representation |
+| --- | --- |
+| `address` | Exactly 64 QRL address bytes |
+| `bool` | One byte, `00` or `01` |
+| `uint`, `uintN` | One unsigned 64-byte integer; it must fit the declared width |
+| `int`, `intN` | One signed 64-byte two's-complement integer with canonical sign extension |
+| `bytesN` | Exactly N bytes, for N from 1 through 64 |
+| `string`, `bytes` | Two-byte length followed by raw value bytes |
+| Custom struct | Its field values, recursively in schema order |
+| `T[]` | One-byte element count followed by the values of T in order |
+
+Integer widths N are multiples of 8 from 8 through 512. The `int`/`uint`
+aliases mean 512 bits. Only one-dimensional dynamic arrays are supported.
+Limits: 8 type definitions, 32 fields across the schema, 4 levels of struct
+nesting, 8 elements per array, and 256 bytes per dynamic value. Strings accept
+printable ASCII and at most 16 LF bytes; other UTF-8/control bytes are rejected.
+The combined prepared review is limited to 4096 bytes and 64 pairs. Exceeding
+any limit rejects the request rather than truncating or hiding values.
+
+#### Hashing and review
+
+The device computes `encodeType`/`typeHash`, both struct hashes, then:
+
+```
+Keccak256(0x19 || 0x01 || domain_struct_hash || message_struct_hash)
+```
+
+Each field in a struct encoding occupies **64 bytes**. Type hashes, hashes of
+strings/dynamic bytes, nested struct hashes and array hashes occupy the leftmost
+32 bytes of that word, with 32 zero bytes on the right. Addresses occupy the
+full word, integers are right-aligned/sign-extended and fixed bytes are
+left-aligned. Arrays hash the concatenation of their 64-byte element words.
+
+This is **not Ethereum's 32-byte-word encoding**. In particular, the older local
+web3-qrl-abi helper using `EIP712Domain` must not be assumed compatible. Clients
+must implement QRL's `QRLTypedDataDomain`/VM64 format. The Go golden vector
+`WideValues` hashes to
+`054b04b5b0976d8b58cb06fb10c1100af45cf46488d16842897e6b2a81ed6ed3`.
+
+Review displays the signing account and primary type, followed by all domain
+and message fields. Full paths, types, array lengths, exact decimal integers,
+checksummed QRL addresses, text and hex bytes are shown in fragments of at most
+64 bytes/two LF. Empty structs/arrays remain visible; text/bytes include their
+byte length. These are regular review pages, not hidden/truncated summaries.
+Definitions and domain names originate from the host; review does not attest a
+dApp's identity or enforce the permissions described by a message.
+
+#### Manual example
+
+With the typed-data app running in Speculos, use:
+
+```sh
+tests/venv/bin/python examples/typed_data.py --url http://127.0.0.1:5003
+```
+
+The default example is a `SpendingPermission` for Example DEX. It only produces
+an off-chain signature and does not execute an approval or send a transaction.
+Use `--sample wide` for the Go golden vector, `--json-file document.json` for
+custom definitions/values, `--print-example` to print JSON, or `--dry-run` to
+calculate the payload/hash without sending. `--output /tmp/typed.json` saves
+public signature verification data. The script verifies the signature locally.
+
 ## Status Words
 
 The following standard Status Words are returned for all APDUs.
@@ -233,6 +355,7 @@ The following standard Status Words are returned for all APDUs.
 | ---      | ---                         | ---                                                   |
 |   6985   | SW_DENY                     | Rejected by user                                      |
 |   6A80   | SW_MESSAGE_INVALID          | Personal message contains unsupported text            |
+|   6A80   | SW_TYPED_DATA_INVALID       | Typed-data schema, value or review budget is invalid   |
 |   6A86   | SW_WRONG_P1P2               | Either P1 or P2 is incorrect                          |
 |   6A87   | SW_WRONG_DATA_LENGTH        | Lc or minimum APDU length is incorrect                |
 |   6D00   | SW_INS_NOT_SUPPORTED        | No command exists with INS                            |
