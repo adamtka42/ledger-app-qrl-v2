@@ -13,14 +13,89 @@
 #include "sw.h"
 #include "validate.h"
 
+#ifdef SCREEN_SIZE_WALLET
+#include "nbgl_fonts.h"
+#include "nbgl_layout.h"
+#endif
+
 static char account[1 + ADDRESS_SIZE * 2 + 1];
 static char byte_length[11];
-static char labels[PERSONAL_MESSAGE_MAX_PARTS][24];
-static nbgl_contentTagValue_t pairs[2 + PERSONAL_MESSAGE_MAX_PARTS];
+/* NBGL requests pairs on demand. Only one message fragment starts on each
+ * page, so one generated label remains valid for the displayed page. Account
+ * and length use constant labels and never overwrite this label buffer. */
+static char review_label[24];
+static nbgl_contentTagValue_t review_pair;
+static uint16_t review_offsets[PERSONAL_MESSAGE_MAX_PARTS];
 static nbgl_contentTagValueList_t list;
+
+/* Account and length come first, then one pair per message fragment. */
+enum { PAIR_ACCOUNT, PAIR_LENGTH, FIRST_MESSAGE_PAIR };
+_Static_assert(FIRST_MESSAGE_PAIR + PERSONAL_MESSAGE_MAX_PARTS <= UINT8_MAX,
+               "review pair index must fit NBGL");
+
+/* The widest fragment label, used to measure pages. */
+#define STRINGIFY_(x) #x
+#define STRINGIFY(x)  STRINGIFY_(x)
+#define WIDEST_MESSAGE_LABEL \
+    "Message (" STRINGIFY(PERSONAL_MESSAGE_MAX_PARTS) "/" STRINGIFY(PERSONAL_MESSAGE_MAX_PARTS) ")"
+_Static_assert(sizeof(WIDEST_MESSAGE_LABEL) <= sizeof(review_label), "fragment label does not fit");
+_Static_assert(sizeof(review_label) + sizeof(review_pair) + sizeof(review_offsets) <= 128,
+               "personal-message review cache exceeds its RAM budget");
+
+#ifdef SCREEN_SIZE_WALLET
+/* Use the same font, width and wrapping as the review. Confirm the proposed
+ * fragment with NBGL's layout calculation so no optional More view is needed.
+ * Temporary termination is restored before the next fragment is measured. */
+static size_t review_page_length(char *text) {
+    for (uint8_t lines = NB_MAX_LINES_IN_REVIEW; lines > 0; lines--) {
+        uint16_t length = 0;
+        nbgl_getTextMaxLenInNbLines(LARGE_MEDIUM_FONT, text, AVAILABLE_WIDTH, lines, &length, true);
+        if (length == 0 || length > strlen(text)) return 0;
+        char saved = text[length];
+        text[length] = '\0';
+        nbgl_contentTagValue_t pair = {.item = WIDEST_MESSAGE_LABEL, .value = text};
+        nbgl_contentTagValueList_t candidate = {.nbPairs = 1, .pairs = &pair, .wrapping = true};
+        bool needs_details = false;
+        uint8_t pairs_in_page = nbgl_useCaseGetNbTagValuesInPage(1, &candidate, 0, &needs_details);
+        text[length] = saved;
+        if (pairs_in_page == 1 && !needs_details) return length;
+    }
+    return 0;
+}
+#endif
+
+static nbgl_contentTagValue_t *get_review_pair(uint8_t index) {
+    personal_message_t *message = &G_context.message_info;
+    if (G_context.req_type != CONFIRM_MESSAGE || G_context.state != STATE_PARSED ||
+        !message->review_prepared || index >= list.nbPairs) {
+        return NULL;
+    }
+    memset(&review_pair, 0, sizeof(review_pair));
+    if (index == PAIR_ACCOUNT) {
+        review_pair.item = "Account";
+        review_pair.value = account;
+    } else if (index == PAIR_LENGTH) {
+        review_pair.item = "Length (bytes)";
+        review_pair.value = byte_length;
+    } else {
+        size_t part = index - FIRST_MESSAGE_PAIR;
+        size_t parts = list.nbPairs - FIRST_MESSAGE_PAIR;
+        snprintf(review_label,
+                 sizeof(review_label),
+                 "Message (%u/%u)",
+                 (unsigned) part + 1,
+                 (unsigned) parts);
+        review_pair.item = parts == 1 ? "Message" : review_label;
+        review_pair.value =
+            message->expected_len == 0 ? "<empty message>" : message->text + review_offsets[part];
+        review_pair.forcePageStart = true;
+    }
+    return &review_pair;
+}
 
 static int abort_display(uint16_t status) {
     reset_request_context();
+    ui_menu_main();
     return io_send_sw(status);
 }
 
@@ -50,31 +125,19 @@ int ui_display_personal_message(void) {
         return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
     personal_message_t *message = &G_context.message_info;
-    uint16_t offsets[PERSONAL_MESSAGE_MAX_PARTS];
     size_t parts;
-    if (!personal_message_prepare_review(message, offsets, &parts)) {
+#ifdef SCREEN_SIZE_WALLET
+    personal_message_page_length_t page_length = review_page_length;
+#else
+    personal_message_page_length_t page_length = NULL;
+#endif
+    if (!personal_message_prepare_review(message, review_offsets, &parts, page_length)) {
         return abort_display(SW_BAD_STATE);
     }
     snprintf(byte_length, sizeof(byte_length), "%u", (unsigned) message->expected_len);
-    memset(pairs, 0, sizeof(pairs));
     memset(&list, 0, sizeof(list));
-    pairs[0].item = "Account";
-    pairs[0].value = account;
-    pairs[1].item = "Length (bytes)";
-    pairs[1].value = byte_length;
-    for (size_t i = 0; i < parts; i++) {
-        snprintf(labels[i],
-                 sizeof(labels[i]),
-                 "Message (%u/%u)",
-                 (unsigned) i + 1,
-                 (unsigned) parts);
-        pairs[2 + i].item = parts == 1 ? "Message" : labels[i];
-        pairs[2 + i].value =
-            message->expected_len == 0 ? "<empty message>" : message->text + offsets[i];
-        pairs[2 + i].forcePageStart = true;
-    }
-    list.nbPairs = 2 + parts;
-    list.pairs = pairs;
+    list.nbPairs = FIRST_MESSAGE_PAIR + parts;
+    list.callback = get_review_pair;
     list.wrapping = true;
     nbgl_useCaseReview(TYPE_MESSAGE,
                        &list,

@@ -23,11 +23,20 @@ bool personal_message_init(personal_message_t *message, uint32_t length) {
     return true;
 }
 
+/* Received bytes so far are consistent with the announced length. */
+static bool message_accepts(const personal_message_t *message, size_t length) {
+    return !message->finished && message->expected_len <= PERSONAL_MESSAGE_MAX_LEN &&
+           message->received_len <= message->expected_len &&
+           length <= message->expected_len - message->received_len;
+}
+
+static bool message_is_complete(const personal_message_t *message) {
+    return message->expected_len <= PERSONAL_MESSAGE_MAX_LEN &&
+           message->received_len == message->expected_len;
+}
+
 bool personal_message_feed(personal_message_t *message, const uint8_t *data, size_t length) {
-    if (message == NULL || message->finished || (data == NULL && length != 0) ||
-        message->expected_len > PERSONAL_MESSAGE_MAX_LEN ||
-        message->received_len > message->expected_len ||
-        length > message->expected_len - message->received_len)
+    if (message == NULL || (data == NULL && length != 0) || !message_accepts(message, length))
         return false;
     size_t newlines = message->newlines;
     for (size_t i = 0; i < length; i++) {
@@ -47,9 +56,7 @@ bool personal_message_feed(personal_message_t *message, const uint8_t *data, siz
 }
 
 bool personal_message_finish(personal_message_t *message) {
-    if (message == NULL || message->finished || message->expected_len > PERSONAL_MESSAGE_MAX_LEN ||
-        message->received_len != message->expected_len)
-        return false;
+    if (message == NULL || message->finished || !message_is_complete(message)) return false;
     keccak256_finalize(&message->hash_ctx);
     keccak256_squeeze(&message->hash_ctx, message->digest);
     keccak256_clear(&message->hash_ctx);
@@ -59,23 +66,25 @@ bool personal_message_finish(personal_message_t *message) {
 
 bool personal_message_prepare_review(personal_message_t *message,
                                      uint16_t offsets[PERSONAL_MESSAGE_MAX_PARTS],
-                                     size_t *count) {
+                                     size_t *count,
+                                     personal_message_page_length_t page_length) {
     if (count == NULL) return false;
     *count = 0;
     if (message == NULL || offsets == NULL || !message->finished || message->review_prepared ||
-        message->expected_len > PERSONAL_MESSAGE_MAX_LEN ||
-        message->received_len != message->expected_len)
+        !message_is_complete(message))
         return false;
     uint16_t lengths[PERSONAL_MESSAGE_MAX_PARTS];
     size_t pos = 0, parts = 0;
     do {
         if (parts >= PERSONAL_MESSAGE_MAX_PARTS) return false;
         offsets[parts] = (uint16_t) pos;
-        size_t start = pos, newlines = 0;
-        while (pos < message->expected_len && pos - start < PERSONAL_MESSAGE_PART_LEN) {
-            if (message->text[pos++] == '\n' && ++newlines == 2) break;
+        size_t length = message->expected_len - pos;
+        if (length > 0 && page_length != NULL) {
+            length = page_length(message->text + pos);
+            if (length == 0 || length > message->expected_len - pos) return false;
         }
-        lengths[parts++] = (uint16_t) (pos - start);
+        lengths[parts++] = (uint16_t) length;
+        pos += length;
     } while (pos < message->expected_len);
     // Move from the end so inserting terminators never overwrites unread text.
     for (size_t i = parts; i-- > 0;) {

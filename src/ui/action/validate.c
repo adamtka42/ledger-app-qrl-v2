@@ -42,10 +42,7 @@ static int crypto_sign_digest(uint8_t digest[32]) {
 
     PRINTF("bip32_path_len %d\n", G_context.bip32_path_len);
     PRINTF("SIGNING START\n");
-    error = crypto_sign_optimized(G_context.bip32_path,
-                                  G_context.bip32_path_len,
-                                  digest,
-                                  32);
+    error = crypto_sign_optimized(G_context.bip32_path, G_context.bip32_path_len, digest, 32);
     PRINTF("SIGNING END\n");
     if (error != CX_OK) {
         wipe_nvm_secrets();
