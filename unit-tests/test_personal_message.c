@@ -37,6 +37,11 @@ static void test_web3_vectors(void **state) {
     }
 }
 
+static size_t test_page_length(char *text) {
+    size_t length = strlen(text);
+    return length > 64 ? 64 : length;
+}
+
 static void check_roundtrip(const uint8_t *text, size_t length) {
     personal_message_t message;
     assert_true(personal_message_init(&message, length));
@@ -46,22 +51,22 @@ static void check_roundtrip(const uint8_t *text, size_t length) {
     memcpy(digest, message.digest, sizeof(digest));
     uint16_t offsets[PERSONAL_MESSAGE_MAX_PARTS];
     size_t count;
-    assert_true(personal_message_prepare_review(&message, offsets, &count));
+    assert_true(personal_message_prepare_review(&message, offsets, &count, test_page_length));
     assert_true(count >= 1 && count <= PERSONAL_MESSAGE_MAX_PARTS);
     size_t position = 0;
     for (size_t i = 0; i < count; i++) {
         const char *part = message.text + offsets[i];
         size_t part_length = strlen(part), newlines = 0;
-        assert_true(part_length <= PERSONAL_MESSAGE_PART_LEN);
+        assert_true(part_length <= 64);
         for (size_t j = 0; j < part_length; j++)
             if (part[j] == '\n') newlines++;
-        assert_true(newlines <= 2);
+        assert_true(newlines <= PERSONAL_MESSAGE_MAX_NEWLINES);
         assert_memory_equal(part, text + position, part_length);
         position += part_length;
     }
     assert_int_equal(position, length);
     assert_memory_equal(message.digest, digest, 32);
-    assert_false(personal_message_prepare_review(&message, offsets, &count));
+    assert_false(personal_message_prepare_review(&message, offsets, &count, test_page_length));
 }
 
 static void test_review_roundtrip(void **state) {
@@ -90,6 +95,67 @@ static void test_stream_boundaries(void **state) {
         assert_true(personal_message_finish(&message));
         assert_memory_equal(message.digest, reference.digest, 32);
     }
+}
+
+static size_t invalid_page_length(char *text) {
+    return strlen(text) + 1;
+}
+
+static size_t zero_page_length(char *text) {
+    (void) text;
+    return 0;
+}
+
+static size_t one_byte_page(char *text) {
+    (void) text;
+    return 1;
+}
+
+static void test_page_selection(void **state) {
+    (void) state;
+    char text[PERSONAL_MESSAGE_MAX_LEN];
+    memset(text, 'W', sizeof(text));
+    personal_message_t message;
+    uint16_t offsets[PERSONAL_MESSAGE_MAX_PARTS];
+    size_t count;
+    assert_true(personal_message_init(&message, sizeof(text)));
+    assert_true(personal_message_feed(&message, (uint8_t *) text, sizeof(text)));
+    assert_true(personal_message_finish(&message));
+    uint8_t digest[32];
+    memcpy(digest, message.digest, sizeof(digest));
+    assert_false(personal_message_prepare_review(&message, offsets, &count, zero_page_length));
+    assert_false(personal_message_prepare_review(&message, offsets, &count, invalid_page_length));
+    assert_false(personal_message_prepare_review(&message, offsets, &count, one_byte_page));
+    assert_false(message.review_prepared);
+    assert_memory_equal(message.text, text, sizeof(text));
+    assert_memory_equal(message.digest, digest, sizeof(digest));
+    assert_true(personal_message_prepare_review(&message, offsets, &count, NULL));
+    assert_int_equal(count, 1);
+    assert_int_equal(offsets[0], 0);
+    assert_int_equal(strlen(message.text), sizeof(text));
+    assert_memory_equal(message.text, text, sizeof(text));
+    assert_memory_equal(message.digest, digest, sizeof(digest));
+}
+
+static void test_review_requires_finished_message(void **state) {
+    (void) state;
+    const char text[] = "Hello world";
+    personal_message_t message;
+    assert_true(personal_message_init(&message, sizeof(text) - 1));
+    assert_true(personal_message_feed(&message, (const uint8_t *) text, sizeof(text) - 1));
+    personal_message_t before;
+    memcpy(&before, &message, sizeof(before));
+    uint16_t offsets[PERSONAL_MESSAGE_MAX_PARTS];
+    size_t count = 99;
+    /* All declared bytes have arrived, but the digest is not finalized yet. */
+    assert_false(personal_message_prepare_review(&message, offsets, &count, NULL));
+    assert_int_equal(count, 0);
+    assert_memory_equal(&message, &before, sizeof(message));
+
+    assert_true(personal_message_finish(&message));
+    assert_true(personal_message_prepare_review(&message, offsets, &count, NULL));
+    assert_int_equal(count, 1);
+    assert_string_equal(message.text + offsets[0], text);
 }
 
 static void test_invalid_input(void **state) {
@@ -123,6 +189,8 @@ int main(void) {
         cmocka_unit_test(test_review_roundtrip),
         cmocka_unit_test(test_stream_boundaries),
         cmocka_unit_test(test_invalid_input),
+        cmocka_unit_test(test_page_selection),
+        cmocka_unit_test(test_review_requires_finished_message),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

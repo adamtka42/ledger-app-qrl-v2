@@ -204,9 +204,12 @@ For hex-looking text, pass its encoded bytes to web3's `hashMessage` to avoid
 that API's automatic hex decoding. For example literal ASCII `0x1234` should
 be checked with `hashMessage("0x307831323334")`.
 
-Review shows the derived account, exact byte count and numbered text fragments
-of at most 64 bytes/two LF each. Every fragment is a normal review page rather
-than a truncated summary. The final action is Sign message on all four models.
+Review shows the derived account, exact byte count and the complete message.
+Nano S+/X receive one Message value and use NBGL's built-in pagination. Stax and
+Flex receive numbered fragments sized with NBGL font and layout metrics, with
+word wrapping. Each fragment fits a normal review page without an optional More
+view. Spaces and LF bytes are preserved across fragment boundaries. The final
+action is Sign message on all four models.
 Text is erased after approval, rejection or abort. Fetching a signature requires
 the approved message session; new messages, transaction starts and address
 derivation invalidate previous exports. Wrong lengths/oversize return `6A87`,

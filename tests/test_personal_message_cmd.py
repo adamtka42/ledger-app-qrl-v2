@@ -15,16 +15,31 @@ MAXIMUM_SUFFIX = b"END-MAXIMUM-TEXT!"
     (b"Login to example.app\nNonce: 123456", "login", "approve"),
     (b"", "empty", "approve"),
     (b"0x1234", "literal_hex", "approve"),
+    (b"\n" * 32 + b"END-BLANK!", "blank_lines", "approve"),
+    (b" " * 900 + b"END-SPACES!", "spaces", "approve"),
     (b"Page content 0123456789. " * 12 + b"END OF MESSAGE", "long", "approve"),
     ((b"W" * 30 + b"\n") * 32 + b"END OF LINES", "newline_limit", "approve"),
     (b"A" * (MAX_MESSAGE_LEN - len(MAXIMUM_SUFFIX)) + MAXIMUM_SUFFIX, "maximum", "approve"),
     (b"Login to example.app\nNonce: 123456", "login", "reject"),
 ])
-def test_personal_message_review(backend, scenario_navigator, message, case, decision):
+def test_personal_message_review(backend, scenario_navigator, monkeypatch, message, case, decision):
     client = BoilerplateCommandSender(backend)
     client.get_public_key(PATH)
     public_key = get_public_key_chunks(backend)
     name = f"test_personal_message_{case}_{decision}"
+    # Observe each mandatory review screen, including golden generation. A
+    # successful signature alone would not detect content hidden behind More.
+    screen_texts = []
+    compare_snapshot = backend.compare_screen_with_snapshot
+
+    def capture_screen(*args, **kwargs):
+        result = compare_snapshot(*args, **kwargs)
+        texts = [event.get("text", "") for event in backend.get_current_screen_content()["events"]]
+        assert "More" not in texts
+        screen_texts.extend(texts)
+        return result
+
+    monkeypatch.setattr(backend, "compare_screen_with_snapshot", capture_screen)
     if decision == "reject":
         with pytest.raises(ExceptionRAPDU) as exc:
             with client.sign_personal_message(PATH, message):
@@ -40,6 +55,10 @@ def test_personal_message_review(backend, scenario_navigator, message, case, dec
     with pytest.raises(ExceptionRAPDU) as exc:
         backend.exchange(cla=CLA, ins=InsType.SIGN_TX, p1=2, p2=1)
     assert exc.value.status == Errors.SW_BAD_STATE
+    ending = {"maximum": "TEXT!", "newline_limit": "END OF LINES", "long": "END OF MESSAGE",
+              "blank_lines": "BLANK!", "spaces": "SPACES!"}.get(case)
+    if ending:
+        assert ending in "".join(screen_texts), "Message ending was not shown before approval"
     signature = get_signature_chunks(backend, client.get_async_response().data,
                                       ins=InsType.SIGN_PERSONAL_MESSAGE)
     digest = personal_message_hash(message)

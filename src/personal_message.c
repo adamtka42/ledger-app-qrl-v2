@@ -59,7 +59,8 @@ bool personal_message_finish(personal_message_t *message) {
 
 bool personal_message_prepare_review(personal_message_t *message,
                                      uint16_t offsets[PERSONAL_MESSAGE_MAX_PARTS],
-                                     size_t *count) {
+                                     size_t *count,
+                                     personal_message_page_length_t page_length) {
     if (count == NULL) return false;
     *count = 0;
     if (message == NULL || offsets == NULL || !message->finished || message->review_prepared ||
@@ -71,11 +72,13 @@ bool personal_message_prepare_review(personal_message_t *message,
     do {
         if (parts >= PERSONAL_MESSAGE_MAX_PARTS) return false;
         offsets[parts] = (uint16_t) pos;
-        size_t start = pos, newlines = 0;
-        while (pos < message->expected_len && pos - start < PERSONAL_MESSAGE_PART_LEN) {
-            if (message->text[pos++] == '\n' && ++newlines == 2) break;
+        size_t length = message->expected_len - pos;
+        if (length > 0 && page_length != NULL) {
+            length = page_length(message->text + pos);
+            if (length == 0 || length > message->expected_len - pos) return false;
         }
-        lengths[parts++] = (uint16_t) (pos - start);
+        lengths[parts++] = (uint16_t) length;
+        pos += length;
     } while (pos < message->expected_len);
     // Move from the end so inserting terminators never overwrites unread text.
     for (size_t i = parts; i-- > 0;) {

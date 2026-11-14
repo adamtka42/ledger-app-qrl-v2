@@ -15,11 +15,11 @@
  * Enumeration with expected INS of APDU commands.
  */
 typedef enum {
-    GET_VERSION = 0x03,     /// version of the application
-    GET_APP_NAME = 0x04,    /// name of the application
-    GET_PUBLIC_KEY = 0x05,  /// public key of corresponding BIP32 path
-    SIGN_TX = 0x06,         /// sign transaction with BIP32 path
-    VERIFY_MSG = 0x07,      /// verify message with BIP32 path
+    GET_VERSION = 0x03,           /// version of the application
+    GET_APP_NAME = 0x04,          /// name of the application
+    GET_PUBLIC_KEY = 0x05,        /// public key of corresponding BIP32 path
+    SIGN_TX = 0x06,               /// sign transaction with BIP32 path
+    VERIFY_MSG = 0x07,            /// verify message with BIP32 path
     SIGN_PERSONAL_MESSAGE = 0x08  /// sign reviewed QRL personal-sign text
 } command_e;
 /**
@@ -36,9 +36,9 @@ typedef enum {
  * Enumeration with user request type.
  */
 typedef enum {
-    CONFIRM_ADDRESS,     /// confirm address derived from public key
-    CONFIRM_TRANSACTION, /// confirm transaction information
-    CONFIRM_MESSAGE      /// confirm personal message text
+    CONFIRM_ADDRESS,      /// confirm address derived from public key
+    CONFIRM_TRANSACTION,  /// confirm transaction information
+    CONFIRM_MESSAGE       /// confirm personal message text
 } request_type_e;
 
 /**
@@ -66,8 +66,8 @@ typedef struct {
 typedef struct {
     state_e state;  /// state of the context
     union {
-        pubkey_ctx_t pk_info;       /// public key context
-        transaction_ctx_t tx_info;  /// transaction context
+        pubkey_ctx_t pk_info;             /// public key context
+        transaction_ctx_t tx_info;        /// transaction context
         personal_message_t message_info;  /// personal-sign text, hash and review state
     };
     request_type_e req_type;              /// user request

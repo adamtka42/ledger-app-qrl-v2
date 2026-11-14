@@ -91,6 +91,25 @@ add_executable(test_personal_message test_personal_message.c)
 target_link_libraries(test_personal_message PUBLIC personal_message hashes cmocka gcov)
 add_test(test_personal_message test_personal_message)
 
+# Exercise the on-demand review cache, including backwards/indexed retrieval.
+add_executable(test_personal_message_review
+    test_personal_message_review.c
+    ../src/ui/nbgl_display_personal_message.c)
+target_include_directories(test_personal_message_review BEFORE PRIVATE mocks ../src/helper ../src/ui/action)
+target_compile_definitions(test_personal_message_review PRIVATE TARGET_FLEX SCREEN_SIZE_WALLET)
+target_link_libraries(test_personal_message_review PRIVATE personal_message address_format hashes cmocka gcov)
+add_test(test_personal_message_review test_personal_message_review)
+
+add_executable(test_personal_message_review_nano
+    test_personal_message_review.c
+    ../src/ui/nbgl_display_personal_message.c)
+target_include_directories(test_personal_message_review_nano BEFORE PRIVATE mocks ../src/helper ../src/ui/action)
+target_compile_definitions(test_personal_message_review_nano PRIVATE TARGET_NANOX)
+target_link_libraries(test_personal_message_review_nano PRIVATE personal_message address_format hashes cmocka gcov)
+add_test(test_personal_message_review_nano test_personal_message_review_nano)
+
+
+
 # Exercise real crypto code with mocked Ledger syscalls and observed erasure.
 add_executable(test_crypto_cleanup
     test_crypto_cleanup.c
