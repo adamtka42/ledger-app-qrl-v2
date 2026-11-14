@@ -167,7 +167,10 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     char amount[TX_FORMAT_MAX_AMOUNT_LEN] = {0};
     if (token->enabled) {
         char integer[TX_FORMAT_MAX_DECIMAL_DIGITS + 1];
-        if (!uint8_array_to_decimal(token->amount, sizeof(token->amount), integer, sizeof(integer)) ||
+        if (!uint8_array_to_decimal(token->amount,
+                                    sizeof(token->amount),
+                                    integer,
+                                    sizeof(integer)) ||
             !format_with_decimals(integer, metadata->decimals, amount, sizeof(amount))) {
             return abort_display(SW_DISPLAY_AMOUNT_FAIL);
         }
@@ -176,13 +179,18 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     }
     PRINTF("amount %s\n", amount);
     memset(g_amount, 0, sizeof(g_amount));
-    snprintf(g_amount, sizeof(g_amount), "%s %s", token->enabled ? metadata->symbol : "QRL", amount);
+    snprintf(g_amount,
+             sizeof(g_amount),
+             "%s %s",
+             token->enabled ? metadata->symbol : "QRL",
+             amount);
 
     // An empty recipient creates a contract; it is not the zero address.
     memset(g_to_address, 0, sizeof(g_to_address));
     if (!is_contract_creation &&
         !format_checksummed_address(token->enabled ? token->target : tx->to,
-                                    g_to_address, sizeof(g_to_address))) {
+                                    g_to_address,
+                                    sizeof(g_to_address))) {
         return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
     if (token->enabled &&
@@ -215,13 +223,13 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     snprintf(g_gas_tip_cap, sizeof(g_gas_tip_cap), "QRL %s", amount);
 
     size_t count = 0;
-#define ADD_PAIR(label, text)          \
-    do {                               \
-        if (count >= MAX_REVIEW_PAIRS) { \
+#define ADD_PAIR(label, text)                   \
+    do {                                        \
+        if (count >= MAX_REVIEW_PAIRS) {        \
             return abort_display(SW_BAD_STATE); \
-        }                              \
-        pairs[count].item = (label);   \
-        pairs[count++].value = (text); \
+        }                                       \
+        pairs[count].item = (label);            \
+        pairs[count++].value = (text);          \
     } while (0)
     ADD_PAIR("From", g_from_address);
     ADD_PAIR("Amount", g_amount);

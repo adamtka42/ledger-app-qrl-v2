@@ -13,6 +13,10 @@ from application_client.boilerplate_command_sender import (
     BoilerplateCommandSender, CLA, InsType, Errors, MAX_APDU_LEN,
 )
 
+from application_client.transaction import (
+    build_transaction_preimage, rlp_length_prefix as _rlp_len, rlp_encode_bytes as _rlp_bytes,
+)
+
 # In this tests we check the behavior of the device when asked to sign a transaction
 
 # ML-DSA-87 signing context: "ZOND" || version 0x01 || descriptor 01 00 00
@@ -139,35 +143,15 @@ def test_calldata_refused_when_blind_signing_disabled(backend: BackendInterface)
 
 # Fields of the preimage used in test_sign_tx_short_tx, so that a transaction
 # with arbitrary calldata can be built without a separate vector generator.
-_CHAIN_ID = bytes.fromhex("01")
-_NONCE = bytes.fromhex("03")
-_GAS_TIP_CAP = bytes.fromhex("77359400")
-_GAS_FEE_CAP = bytes.fromhex("0ba43b7400")
-_GAS = bytes.fromhex("61a8")
 _TO = bytes.fromhex("b94f5374fce5edbc8e2a8697c15331677e6ebf0b" + "aa" * 44)
-_VALUE = bytes.fromhex("016345785d8a0000")
-_DESCRIPTOR = bytes.fromhex("010000")
 _REFERENCE_PREIMAGE = bytes.fromhex("02f86201038477359400850ba43b74008261a8b840b94f5374fce5edbc8e2a8697c15331677e6ebf0baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88016345785d8a000080c08301000080")
 
 
-def _rlp_len(base: int, n: int) -> bytes:
-    if n < 56:
-        return bytes([base + n])
-    length = n.to_bytes((n.bit_length() + 7) // 8, "big")
-    return bytes([base + 55 + len(length)]) + length
-
-
-def _rlp_bytes(b: bytes) -> bytes:
-    if len(b) == 1 and b[0] < 0x80:
-        return b
-    return _rlp_len(0x80, len(b)) + b
-
-
 def build_preimage(data: bytes, access_list: bytes = b"\xc0", to: bytes = _TO) -> bytes:
-    """Build the 11-field preimage; access_list is an already RLP-encoded list."""
-    payload = b"".join(_rlp_bytes(f) for f in (_CHAIN_ID, _NONCE, _GAS_TIP_CAP, _GAS_FEE_CAP, _GAS, to, _VALUE, data))
-    payload += access_list + _rlp_bytes(_DESCRIPTOR) + b"\x80"
-    return b"\x02" + _rlp_len(0xc0, len(payload)) + payload
+    """Build the reference transaction with configurable data, access list and recipient."""
+    return build_transaction_preimage(chain_id=1, nonce=3, gas_tip_cap=2_000_000_000,
+                                      gas_fee_cap=50_000_000_000, gas=25_000, to=to,
+                                      value=100_000_000_000_000_000, data=data, access_list=access_list)
 
 
 def enable_blind_signing(device: Device, navigator: Navigator) -> None:

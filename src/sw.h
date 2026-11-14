@@ -9,9 +9,13 @@
  */
 #define SW_TOKEN_METADATA_INVALID 0x6A80
 /**
- * Status word for failed token metadata authentication or no configured issuer.
+ * Status word for failed token metadata authentication.
  */
 #define SW_TOKEN_METADATA_UNTRUSTED 0x6982
+/**
+ * Status word for no configured token metadata issuer.
+ */
+#define SW_TOKEN_METADATA_NO_ISSUER 0x6A88
 /**
  * Status word for denied by user.
  */

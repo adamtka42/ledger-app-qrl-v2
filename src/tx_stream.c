@@ -212,12 +212,14 @@ static bool field_store(const tx_stream_t *s, zond_tx_t *tx, const uint8_t *src,
             memcpy(tx->descriptor + pos, src, n);
             break;
         case TX_F_DATA:
-            if (s->field_len == TOKEN_CALL_CALLDATA_LEN) {
-                memcpy(tx->data + pos, src, n);
+            if (pos < sizeof(tx->data)) {
+                uint32_t retained = sizeof(tx->data) - pos;
+                if (retained > n) retained = n;
+                memcpy(tx->data + pos, src, retained);
             }
             break;
         default:
-            // Other data, TX_F_ACCESS_LIST, TX_F_EXTRA_PARAMS: hashed by the caller.
+            // TX_F_ACCESS_LIST and TX_F_EXTRA_PARAMS: hashed by the caller.
             break;
     }
     return true;

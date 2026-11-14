@@ -53,10 +53,10 @@ typedef struct {
  * Structure for transaction information context.
  */
 typedef struct {
-    tx_stream_t stream;      /// streaming RLP parser position, kept between APDUs
-    keccak256_ctx hash_ctx;  /// Keccak-256 of the raw bytes, fed chunk by chunk
-    uint8_t m_hash[32];      /// message hash digest
-    zond_tx_t tx_data;       /// decoded fields for display
+    tx_stream_t stream;               /// streaming RLP parser position, kept between APDUs
+    keccak256_ctx hash_ctx;           /// Keccak-256 of the raw bytes, fed chunk by chunk
+    uint8_t m_hash[32];               /// message hash digest
+    zond_tx_t tx_data;                /// decoded fields for display
     token_metadata_t token_metadata;  /// authenticated for this signing session only
     token_call_t token_call;
 } transaction_ctx_t;
