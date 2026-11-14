@@ -98,6 +98,8 @@ if(NOT TOKEN_METADATA_TEST_PYTHON)
 endif()
 add_test(NAME test_token_metadata_key
          COMMAND ${TOKEN_METADATA_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/test_token_metadata_key.py)
+add_test(NAME test_transaction_builder
+         COMMAND ${TOKEN_METADATA_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/test_transaction_builder.py)
 
 # Exercise real crypto code with mocked Ledger syscalls and observed erasure.
 add_executable(test_crypto_cleanup

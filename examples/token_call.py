@@ -17,22 +17,7 @@ from dilithium_py.ml_dsa import ML_DSA_87
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 from application_client.token_metadata import DOMAIN, metadata_body, transfer_calldata
-
-
-def rlp(item):
-    if isinstance(item, int):
-        item = item.to_bytes((item.bit_length() + 7) // 8, "big")
-    if isinstance(item, list):
-        payload = b"".join(rlp(x) for x in item)
-        base = 0xc0
-    else:
-        payload, base = bytes(item), 0x80
-        if len(payload) == 1 and payload[0] < 0x80:
-            return payload
-    if len(payload) < 56:
-        return bytes([base + len(payload)]) + payload
-    length = len(payload).to_bytes((len(payload).bit_length() + 7) // 8, "big")
-    return bytes([base + 55 + len(length)]) + length + payload
+from application_client.transaction import build_transaction_preimage
 
 
 def address(text):
@@ -62,8 +47,9 @@ def main():
     key = ECC.construct(curve="P-256", d=1) if args.test_key else ECC.import_key(args.issuer_key.read_bytes())
     signature = DSS.new(key, "deterministic-rfc6979", encoding="der").sign(SHA256.new(DOMAIN + body))
     metadata = body + signature
-    tx = b"\x02" + rlp([args.chain_id, args.nonce, 0, 2_550_000_000, 120_000,
-                          contract, 0, transfer_calldata(args.units, recipient), [], b"\x01\0\0", b""])
+    tx = build_transaction_preimage(chain_id=args.chain_id, nonce=args.nonce, gas_tip_cap=0,
+                                     gas_fee_cap=2_550_000_000, gas=120_000, to=contract,
+                                     value=0, data=transfer_calldata(args.units, recipient))
     print(f"Token: {args.symbol}; raw units: {args.units}; decimals: {args.decimals}")
     print(f"Contract: {args.contract}\nRecipient: {args.recipient}\nChain ID: {args.chain_id}")
     if args.dry_run:
@@ -79,7 +65,11 @@ def main():
             reply = bytes.fromhex(json.load(response)["data"])
         if len(reply) < 2 or reply[-2:] != b"\x90\0":
             status = reply[-2:].hex()
-            raise RuntimeError(f"APDU rejected: {status}. Check app build, issuer key, and user decision.")
+            if status == "6a88":
+                raise RuntimeError("No token metadata issuer configured in the app. Check the firmware build flags.")
+            if status == "6982":
+                raise RuntimeError("Token metadata authentication failed. Check the issuer key and signature.")
+            raise RuntimeError(f"APDU rejected: {status}. Check app build and user decision.")
         return reply[:-2]
 
     path = b"\x05" + b"".join(x.to_bytes(4, "big") for x in [0x8000002c, 0x800000ee, 0x80000000, 0, 0])

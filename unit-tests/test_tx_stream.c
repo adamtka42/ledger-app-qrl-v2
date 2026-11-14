@@ -526,6 +526,47 @@ static void test_reject_string_where_list_expected(void **state) {
     assert_rejected_all_chunk_sizes(buf, n);
 }
 
+static void test_calldata_prefix_all_lengths(void **state) {
+    (void) state;
+    const size_t lengths[] = {0,
+                              1,
+                              3,
+                              4,
+                              64,
+                              131,
+                              132,
+                              133,
+                              196,
+                              TX_CALLDATA_MAX_LEN - 1,
+                              TX_CALLDATA_MAX_LEN,
+                              TX_CALLDATA_MAX_LEN + 1,
+                              768,
+                              3000};
+    for (size_t i = 0; i < sizeof(g_data); i++) {
+        g_data[i] = (uint8_t) (i * 7 + 3);
+    }
+    for (size_t li = 0; li < sizeof(lengths) / sizeof(lengths[0]); li++) {
+        const size_t len = lengths[li];
+        const size_t retained = len < TX_CALLDATA_MAX_LEN ? len : TX_CALLDATA_MAX_LEN;
+        const size_t n = build_simple(g_tx, sizeof(g_tx), g_data, len);
+        for (size_t ci = 0; ci < N_CHUNK_SIZES; ci++) {
+            ctx_t c;
+            tx_stream_init(&c.s, &c.tx);
+            assert_int_equal(feed_chunked(&c, g_tx, n, CHUNK_SIZES[ci]), TX_STREAM_FINISHED);
+            assert_int_equal(c.tx.data_len, len);
+            assert_true(c.tx.has_data == (len != 0));
+            assert_memory_equal(c.tx.data, g_data, retained);
+            for (size_t j = retained; j < sizeof(c.tx.data); j++) {
+                assert_int_equal(c.tx.data[j], 0);
+            }
+            /* Truncating storage must not consume or corrupt subsequent fields. */
+            assert_memory_equal(c.tx.descriptor, ((uint8_t[]) {1, 0, 0}), 3);
+            assert_int_equal(c.tx.descriptor_len, 3);
+            assert_int_equal(c.s.total_len, n);
+        }
+    }
+}
+
 static void test_large_data_sets_flag_only(void **state) {
     (void) state;
     const size_t data_len = 3000;  // far above the old 510 byte buffer
@@ -659,6 +700,8 @@ static void test_init_resets_state(void **state) {
     assert_int_equal(c.tx.to[0], 0);
     assert_int_equal(c.tx.to_len, 0);
     assert_false(c.tx.has_data);
+    assert_int_equal(c.tx.data_len, 0);
+    assert_memory_equal(c.tx.data, (uint8_t[TX_CALLDATA_MAX_LEN]) {0}, TX_CALLDATA_MAX_LEN);
     assert_false(c.tx.has_access_list);
 }
 
@@ -711,6 +754,7 @@ int main(void) {
         cmocka_unit_test(test_reject_trailing_bytes),
         cmocka_unit_test(test_reject_list_length_mismatch),
         cmocka_unit_test(test_reject_string_where_list_expected),
+        cmocka_unit_test(test_calldata_prefix_all_lengths),
         cmocka_unit_test(test_large_data_sets_flag_only),
         cmocka_unit_test(test_nonempty_access_list_sets_flag),
         cmocka_unit_test(test_short_data),

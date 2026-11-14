@@ -203,7 +203,7 @@ coordinates form a valid P-256 point, and rejects the public test key. Validatio
 uses Python 3's standard library and stops the build on an invalid key.
 
 No production authority is configured by default: the metadata command returns
-`6982`, while existing native transfers and blind signing remain available.
+`6A88` (`SW_TOKEN_METADATA_NO_ISSUER`), while existing native transfers and blind signing remain available.
 The issuer must curate tokens, ABI profiles, and stable symbol/decimals bindings.
 An issuer backend and wallet integration must provide signed QRL descriptors;
 Ethereum's existing 20-byte token metadata is not compatible with this payload.
@@ -215,14 +215,15 @@ For emulator tests only:
 
 ```sh
 make DEBUG=1 TOKEN_METADATA_TEST_KEY=1
-pytest --device nanosp tests/test_token_transfer_cmd.py
+pytest --device nanosp --token-metadata-test-key tests/test_token_transfer_cmd.py
 ```
 
 The test issuer uses the publicly known P-256 scalar `1`, requires `DEBUG=1`, and
 displays `TEST token transfer` during review. The same key is rejected when
 provided as a production key. Never deploy the test-authority build for funds.
-Positive metadata tests skip on builds that do not trust the explicit test key;
-negative authentication tests still run. Tests use synthetic contracts, not a
+Positive metadata tests skip only when the app reports no configured issuer.
+With `--token-metadata-test-key`, this response fails the test instead; invalid
+signatures always fail fixture setup. Negative authentication tests still run. Tests use synthetic contracts, not a
 claim that a real token has been approved or deployed on a particular network.
 
 #### Supported clear-signed call
@@ -232,7 +233,10 @@ Only `transfer(address,uint256)` is decoded in this version:
 - Selector: `a9059cbb` (4 bytes).
 - Recipient: one 64-byte QRVM ABI word.
 - Amount: one 64-byte word, with the upper 32 bytes zero (`uint256`).
-- Exact calldata length: 132 bytes; no additional bytes.
+- Exact calldata length: 132 bytes; no additional bytes. The RLP parser retains
+  the first 256 calldata bytes for operation decoders and records the full length;
+  larger payloads continue to be streamed and hashed. This storage limit does not
+  broaden the supported clear-signing profile.
 - Token contract and full Chain ID must match the verified descriptor.
 - Native QRL value must be zero; access list must be empty.
 
@@ -261,10 +265,11 @@ The following standard Status Words are returned for all APDUs.
 | SW       | SW name                     | Description                                           |
 | ---      | ---                         | ---                                                   |
 |   6985   | SW_DENY                     | Rejected by user                                      |
-|   6982   | SW_TOKEN_METADATA_UNTRUSTED  | Invalid signature or no configured metadata authority |
+|   6982   | SW_TOKEN_METADATA_UNTRUSTED  | Token metadata authentication failed                   |
 |   6A80   | SW_TOKEN_METADATA_INVALID   | Malformed or unsupported token descriptor              |
 |   6A86   | SW_WRONG_P1P2               | Either P1 or P2 is incorrect                          |
 |   6A87   | SW_WRONG_DATA_LENGTH        | Lc or minimum APDU length is incorrect                |
+|   6A88   | SW_TOKEN_METADATA_NO_ISSUER | No token metadata authority configured                |
 |   6D00   | SW_INS_NOT_SUPPORTED        | No command exists with INS                            |
 |   6E00   | SW_CLA_NOT_SUPPORTED        | Bad CLA used for this application                     |
 |   B000   | SW_WRONG_RESPONSE_LENGTH    | Wrong response length (buffer size problem)           |

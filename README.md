@@ -42,6 +42,19 @@ docker run --rm -v "$PWD:/app" -w /app/tests <image-with-test-deps> \
 (Add the packages from `tests/requirements.txt` to the dev-tools image's
 `/opt/venv` once with `pip install -r tests/requirements.txt`.)
 
+To run the token clear-signing tests, build with
+`DEBUG=1 TOKEN_METADATA_TEST_KEY=1` and pass `--token-metadata-test-key` to pytest:
+
+```sh
+pytest tests --device flex --token-metadata-test-key
+```
+
+This option makes a missing issuer (`6A88`) fail the test instead of skipping it.
+Without it, builds with no configured issuer skip the positive token tests.
+Metadata authentication failures (`6982`) always fail fixture setup.
+CI runs both the default build and a separate test-key build for all supported devices.
+The public test key is for emulator testing only.
+
 Screen snapshots regenerate with `--golden_run` after intentional UI changes.
 
 ### End-to-end devnet test

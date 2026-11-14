@@ -23,16 +23,12 @@ def metadata_body(chain_id: int, contract: bytes, symbol: str, decimals: int) ->
     return b"\x01" + chain_id.to_bytes(32, "big") + contract + bytes([decimals, len(ticker)]) + ticker
 
 
-def test_metadata(chain_id: int = 1, contract: bytes = TEST_CONTRACT,
-                  symbol: str = "TKN", decimals: int = 6, *, scalar: int = 1) -> bytes:
+def make_test_metadata(chain_id: int = 1, contract: bytes = TEST_CONTRACT,
+                       symbol: str = "TKN", decimals: int = 6, *, scalar: int = 1) -> bytes:
     body = metadata_body(chain_id, contract, symbol, decimals)
     key = ECC.construct(curve="P-256", d=scalar)
     signature = DSS.new(key, "deterministic-rfc6979", encoding="der").sign(SHA256.new(DOMAIN + body))
     return body + signature
-
-
-# Not a pytest test; this module is a fixture/helper for device tests.
-test_metadata.__test__ = False
 
 
 def transfer_calldata(amount: int, recipient: bytes = TEST_RECIPIENT) -> bytes:
