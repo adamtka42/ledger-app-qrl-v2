@@ -69,6 +69,16 @@ static void bytes_to_lower_hex(const uint8_t *bytes, size_t len, char *out) {
     out[2 * len] = '\0';
 }
 
+// The token amount, scaled by the decimals of its signed metadata.
+static bool format_token_amount(const token_call_t *token,
+                                const token_metadata_t *metadata,
+                                char *out,
+                                size_t size) {
+    char integer[TX_FORMAT_MAX_DECIMAL_DIGITS + 1];
+    return uint8_array_to_decimal(token->amount, sizeof(token->amount), integer, sizeof(integer)) &&
+           format_with_decimals(integer, metadata->decimals, out, size);
+}
+
 // called when long press button on 3rd page is long-touched or when reject footer is touched
 static void review_choice(bool confirm) {
     // Answer, display a status page and go back to main.
@@ -165,24 +175,24 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
 
     // Format amount
     char amount[TX_FORMAT_MAX_AMOUNT_LEN] = {0};
-    if (token->enabled) {
-        char integer[TX_FORMAT_MAX_DECIMAL_DIGITS + 1];
-        if (!uint8_array_to_decimal(token->amount, sizeof(token->amount), integer, sizeof(integer)) ||
-            !format_with_decimals(integer, metadata->decimals, amount, sizeof(amount))) {
-            return abort_display(SW_DISPLAY_AMOUNT_FAIL);
-        }
-    } else if (!format_qrl_amount(tx->value, tx->value_len, amount, sizeof(amount))) {
-        return abort_display(SW_DISPLAY_AMOUNT_FAIL);
-    }
+    const bool amount_ok =
+        token->enabled ? format_token_amount(token, metadata, amount, sizeof(amount))
+                       : format_qrl_amount(tx->value, tx->value_len, amount, sizeof(amount));
+    if (!amount_ok) return abort_display(SW_DISPLAY_AMOUNT_FAIL);
     PRINTF("amount %s\n", amount);
     memset(g_amount, 0, sizeof(g_amount));
-    snprintf(g_amount, sizeof(g_amount), "%s %s", token->enabled ? metadata->symbol : "QRL", amount);
+    snprintf(g_amount,
+             sizeof(g_amount),
+             "%s %s",
+             token->enabled ? metadata->symbol : "QRL",
+             amount);
 
     // An empty recipient creates a contract; it is not the zero address.
     memset(g_to_address, 0, sizeof(g_to_address));
     if (!is_contract_creation &&
         !format_checksummed_address(token->enabled ? token->target : tx->to,
-                                    g_to_address, sizeof(g_to_address))) {
+                                    g_to_address,
+                                    sizeof(g_to_address))) {
         return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
     if (token->enabled &&
@@ -215,13 +225,13 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     snprintf(g_gas_tip_cap, sizeof(g_gas_tip_cap), "QRL %s", amount);
 
     size_t count = 0;
-#define ADD_PAIR(label, text)          \
-    do {                               \
-        if (count >= MAX_REVIEW_PAIRS) { \
+#define ADD_PAIR(label, text)                   \
+    do {                                        \
+        if (count >= MAX_REVIEW_PAIRS) {        \
             return abort_display(SW_BAD_STATE); \
-        }                              \
-        pairs[count].item = (label);   \
-        pairs[count++].value = (text); \
+        }                                       \
+        pairs[count].item = (label);            \
+        pairs[count++].value = (text);          \
     } while (0)
     ADD_PAIR("From", g_from_address);
     ADD_PAIR("Amount", g_amount);

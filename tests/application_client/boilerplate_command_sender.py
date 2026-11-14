@@ -34,6 +34,7 @@ class InsType(IntEnum):
 class Errors(IntEnum):
     SW_TOKEN_METADATA_INVALID  = 0x6A80
     SW_TOKEN_METADATA_UNTRUSTED = 0x6982
+    SW_TOKEN_METADATA_NO_ISSUER = 0x6A88
     SW_DENY                    = 0x6985
     SW_WRONG_P1P2              = 0x6A86
     SW_WRONG_DATA_LENGTH       = 0x6A87
