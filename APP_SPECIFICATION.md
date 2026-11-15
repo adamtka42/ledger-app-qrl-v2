@@ -306,6 +306,24 @@ The combined prepared review is limited to 4096 bytes and 64 pairs after
 device-specific pagination. Exceeding any limit rejects the request rather
 than truncating or hiding values.
 
+#### Compatibility requirements for wallets
+
+The device implements a bounded, stricter subset of go-qrl typed data. Wallets
+must validate these constraints before requesting a signature:
+
+- Domain fields must follow the canonical order listed above, even though
+  other struct fields retain their declared order.
+- Text strings require printable ASCII and LF; arbitrary UTF-8 and other control
+  characters are rejected. Binary `bytes` values are not subject to this text restriction.
+- An `intN` must be in `[-2^(N-1), 2^(N-1)-1]` and use canonical 64-byte sign
+  extension; values outside the signed range are rejected.
+- Type graphs must be acyclic and fit four struct levels on every path, including
+  shared types and empty arrays. Domain/message roots count as level one;
+  an array container adds no level, but a struct element does.
+
+Documents outside these rules or the limits above are rejected with
+`SW_TYPED_DATA_INVALID`; they are not signed through a blind-signing fallback.
+
 #### Hashing and review
 
 The device computes `encodeType`/`typeHash`, both struct hashes, then:

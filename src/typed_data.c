@@ -173,7 +173,8 @@ static bool dependencies(const typed_data_t *data,
                          size_t depth) {
     uint8_t bit = (uint8_t) (1u << type);
     if (depth > TYPED_DATA_MAX_DEPTH || (*active & bit)) return false;
-    if (*found & bit) return true;
+    /* A shared type may be reached again by a deeper path. Deduplicate the
+     * resulting type list, not traversal of the depth/cycle checks. */
     *active |= bit;
     const typed_type_t *definition = &data->types[type];
     for (size_t i = 0; i < definition->field_count; i++) {

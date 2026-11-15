@@ -119,8 +119,7 @@ def encode_type(type_name, types):
     def visit(name, active, depth):
         if depth > MAX_DEPTH or name in active:
             raise ValueError("Cyclic/deep type graph")
-        if name in found:
-            return
+        # Shared types must be revisited: a later path can be deeper.
         found.add(name)
         for field in types[name]:
             dependency = field["type"].removesuffix("[]")
