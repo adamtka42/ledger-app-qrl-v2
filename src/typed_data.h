@@ -80,6 +80,13 @@ typedef struct {
     typed_data_page_length_t review_page_length;
 } typed_data_t;
 
+/* Only the temporary workspace is bounded here; recursive hash/layout frames
+ * need additional stack. Reassess this cap and APP_STACK_MIN_SIZE when raising
+ * parser limits, especially TYPED_DATA_MAX_DEPTH. */
+#define TYPED_DATA_MAX_WORKSPACE_BYTES (10 * 1024)
+_Static_assert(sizeof(typed_data_t) <= TYPED_DATA_MAX_WORKSPACE_BYTES,
+               "typed-data parser workspace exceeds stack budget; remeasure before raising limits");
+
 /** Start a bounded, versioned schema-and-values payload; no host digest is accepted. */
 bool typed_data_init(typed_data_t *data, uint32_t length);
 /** Receive an exact fragment of the declared payload. */

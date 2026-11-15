@@ -1,4 +1,4 @@
-# Fuzzing on transaction parser
+# Fuzzing parsers and display preparation
 
 ## Fuzzing
 
@@ -16,6 +16,13 @@ The vulnerable input file created can be passed as an argument to the fuzzer to 
 
 > **Note**: Usually we want to write a separate fuzz target for each functionality.
 > `fuzz_tx_format.c` is a second target for the amount / fee display formatters in `src/ui/tx_format.c`.
+
+`fuzz_typed_data.c` covers typed-data schema/value validation, hashing and review
+preparation. It compares a complete payload with the same payload fed in chunks,
+checks accepted review offsets and string bounds, and exercises both whole values
+and bounded fragments. The first byte controls chunk size and pagination; the
+remaining bytes contain up to 4096 bytes of wire data. It uses real SDK-free hash
+and address code; NBGL and signing are covered separately by device tests.
 
 ## Manual usage based on Ledger container
 
@@ -53,6 +60,18 @@ make -C /tmp/fuzz-build
 # optional: a directory of seed inputs; new interesting inputs are added to it
 /tmp/fuzz-build/fuzz_tx_parser -max_total_time=60 -max_len=8192 /app/fuzzing/corpus
 ```
+
+To fuzz typed data, generate a corpus from the nine existing go-qrl vectors
+(four chunk/pagination settings per vector), then run:
+
+```console
+python3 /app/fuzzing/generate_typed_data_corpus.py /tmp/typed-data-corpus
+/tmp/fuzz-build/fuzz_typed_data -max_total_time=60 -max_len=4097 -dict=/app/fuzzing/fuzz_typed_data.dict /tmp/typed-data-corpus
+```
+
+The existing ClusterFuzzLite workflows build and run this target as well.
+`.clusterfuzzlite/build.sh` exports its dictionary, options and seed corpus ZIP;
+the input limit includes the leading control byte. No workflow change is needed.
 
 A finding is reported with a sanitizer stack trace and the triggering input is saved as `crash-*`
 in the current directory; pass that file as the only argument to reproduce it.
