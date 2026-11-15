@@ -48,10 +48,14 @@ static char g_nonce[21];
 static char g_gas_limit[21];
 static char g_gas_tip_cap[TX_FORMAT_MAX_AMOUNT_LEN + 5];
 static char g_tx_hash[65];
+static char g_contract_values[CONTRACT_CALL_MAX_FIELDS]
+                             [CONTRACT_CALL_LABEL_MAX + 1 + ADDRESS_SIZE * 2 + 2];
+static char g_contract_labels[CONTRACT_CALL_MAX_FIELDS][CONTRACT_CALL_LABEL_MAX + 4];
 
 // Maximum review fields: From/Owner, Amount/Spending limit, To/Spender or Operation, Token
 // contract, Chain ID, Gas limit, Priority fee / gas, Max fees, Nonce, Transaction hash.
-enum { MAX_REVIEW_PAIRS = 10 };
+// Contract calls add Operation and up to three numbered arguments to native fields.
+enum { MAX_REVIEW_PAIRS = 10 + CONTRACT_CALL_MAX_FIELDS };
 static nbgl_contentTagValue_t pairs[MAX_REVIEW_PAIRS];
 static nbgl_contentTagValueList_t pairList;
 
@@ -149,6 +153,11 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         return abort_display(SW_BAD_STATE);
     }
     const bool is_contract_creation = (tx->to_len == 0);
+    const bool is_contract = G_context.tx_info.contract_call;
+    const contract_descriptor_t *descriptor = &G_context.tx_info.contract_descriptor;
+    if (is_contract && (is_blind_signed || !contract_call_matches(tx, descriptor))) {
+        return abort_display(SW_BAD_STATE);
+    }
     const token_call_t *token = &G_context.tx_info.token_call;
     const token_metadata_t *metadata = &G_context.tx_info.token_metadata;
     const bool is_token = token->kind != TOKEN_CALL_NONE;
@@ -175,6 +184,15 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
 #else
         review_title = "Send tokens";
 #endif
+    }
+
+    if (is_contract) {
+#ifdef CONTRACT_DESCRIPTOR_TEST_KEY
+        review_title = "TEST contract call";
+#else
+        review_title = "Review contract call";
+#endif
+        confirmation_title = "Sign contract call";
     }
 
     print_tx_utils(tx);
@@ -273,6 +291,46 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     }
     if (is_token) {
         ADD_PAIR("Token contract", g_token_contract);
+    }
+    if (is_contract) {
+        ADD_PAIR("Operation", descriptor->operation);
+        for (size_t i = 0; i < descriptor->field_count; i++) {
+            const contract_field_t *field = &descriptor->fields[i];
+            const uint8_t *word = tx->data + 4 + ADDRESS_LENGTH * i;
+            char *value = g_contract_values[i];
+            if (field->kind == CONTRACT_FIELD_ADDRESS) {
+                if (!format_checksummed_address(word, value, sizeof(g_contract_values[i])))
+                    return abort_display(SW_DISPLAY_ADDRESS_FAIL);
+            } else if (field->kind == CONTRACT_FIELD_UINT256) {
+                if (!uint8_array_to_decimal(word + ADDRESS_LENGTH - MAX_FIELD_SIZE,
+                                            MAX_FIELD_SIZE,
+                                            value,
+                                            sizeof(g_contract_values[i])))
+                    return abort_display(SW_DISPLAY_AMOUNT_FAIL);
+            } else {
+                strcpy(value, word[ADDRESS_LENGTH - 1] ? "true" : "false");
+            }
+#ifndef SCREEN_SIZE_WALLET
+            // Nano truncates long titles, including their pagination suffix.
+            // Keep a short device title and show the complete attested label in the value.
+            const size_t label_len = strlen(field->label);
+            const size_t value_len = strlen(value);
+            if (label_len + 1 + value_len >= sizeof(g_contract_values[i]))
+                return abort_display(SW_BAD_STATE);
+            memmove(value + label_len + 1, value, value_len + 1);
+            memcpy(value, field->label, label_len);
+            value[label_len] = '\n';
+            memcpy(g_contract_labels[i], "Arg 1", sizeof("Arg 1"));
+            g_contract_labels[i][4] = (char) ('1' + i);
+#else
+            // Numbered labels cannot impersonate device fields such as From or Max fees.
+            g_contract_labels[i][0] = (char) ('1' + i);
+            g_contract_labels[i][1] = '.';
+            g_contract_labels[i][2] = ' ';
+            memcpy(g_contract_labels[i] + 3, field->label, sizeof(field->label));
+#endif
+            ADD_PAIR(g_contract_labels[i], value);
+        }
     }
     ADD_PAIR("Chain ID", g_chain_id);
     ADD_PAIR("Gas limit", g_gas_limit);

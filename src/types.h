@@ -9,6 +9,7 @@
 #include "constant.h"
 #include "tx_types.h"
 #include "token_call.h"
+#include "contract_call.h"
 #include "keccak256.h"  // keccak256_ctx
 
 /**
@@ -20,7 +21,8 @@ typedef enum {
     GET_PUBLIC_KEY = 0x05,  /// public key of corresponding BIP32 path
     SIGN_TX = 0x06,         /// sign transaction with BIP32 path
     VERIFY_MSG = 0x07,      /// verify message with BIP32 path
-    PROVIDE_TOKEN_METADATA = 0x0A
+    PROVIDE_TOKEN_METADATA = 0x0A,
+    PROVIDE_CONTRACT_DESCRIPTOR = 0x0B  /// authenticated static contract call description
 } command_e;
 /**
  * Enumeration with parsing state.
@@ -59,6 +61,8 @@ typedef struct {
     zond_tx_t tx_data;                /// decoded fields for display
     token_metadata_t token_metadata;  /// authenticated for this signing session only
     token_call_t token_call;
+    contract_descriptor_t contract_descriptor;  /// verified and consumed within this session
+    bool contract_call;                         /// complete transaction matched descriptor
 } transaction_ctx_t;
 
 /**

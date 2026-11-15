@@ -33,4 +33,4 @@ if __name__ == "__main__":
     try:
         main()
     except ValueError as exc:
-        sys.exit(f"Invalid token metadata issuer key: {exc}")
+        sys.exit(f"Invalid metadata issuer key: {exc}")

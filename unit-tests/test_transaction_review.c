@@ -21,6 +21,7 @@
 global_ctx_t G_context;
 const internal_storage_t N_storage_real = {0};
 const uint8_t C_app_qrl_64px = 0;
+const uint8_t C_app_qrl_14px = 0;
 static internal_storage_t storage;
 typedef enum {
     NO_FAULT,
@@ -89,7 +90,34 @@ void nbgl_useCaseReview(int type,
     (void) subtitle;
     (void) finish;
     assert_int_equal(type, TYPE_TRANSACTION);
-    assert_int_equal(pairs->nbPairs, 9);
+    assert_int_equal(pairs->nbPairs, G_context.tx_info.contract_call ? 13 : 9);
+    if (G_context.tx_info.contract_call) {
+        assert_string_equal(title, "Review contract call");
+        assert_string_equal(finish, "Sign contract call");
+        assert_string_equal(pairs->pairs[1].value, "QRL 0");
+        assert_string_equal(pairs->pairs[3].item, "Operation");
+        assert_string_equal(pairs->pairs[3].value, "Configure account");
+#ifdef SCREEN_SIZE_WALLET
+        assert_string_equal(pairs->pairs[4].item, "1. Owner");
+        assert_string_equal(pairs->pairs[5].item, "2. IntegerField");
+        assert_string_equal(
+            pairs->pairs[5].value,
+            "115792089237316195423570985008687907853269984665640564039457584007913129639935");
+        assert_string_equal(pairs->pairs[6].item, "3. Enabled");
+        assert_string_equal(pairs->pairs[6].value, "true");
+#else
+        assert_string_equal(pairs->pairs[4].item, "Arg 1");
+        assert_memory_equal(pairs->pairs[4].value, "Owner\nQ", 7);
+        assert_string_equal(pairs->pairs[5].item, "Arg 2");
+        assert_string_equal(pairs->pairs[5].value,
+                            "IntegerField\n11579208923731619542357098500868790785326998466564056403"
+                            "9457584007913129639935");
+        assert_string_equal(pairs->pairs[6].item, "Arg 3");
+        assert_string_equal(pairs->pairs[6].value, "Enabled\ntrue");
+#endif
+        assert_string_equal(pairs->pairs[11].item, "Nonce");
+        assert_string_equal(pairs->pairs[12].item, "Transaction hash");
+    }
     assert_non_null(pairs->pairs);
     spinner = false;
     review_callback = choice;
@@ -325,12 +353,51 @@ static void test_rejection_status(void **state) {
     }
 }
 
+static void test_contract_review_capacity_and_validation(void **state) {
+    (void) state;
+    for (unsigned invalid = 0; invalid < 2; invalid++) {
+        start_session(NO_FAULT, 0);
+        zond_tx_t *tx = &G_context.tx_info.tx_data;
+        tx->value_len = 0;
+        tx->has_data = true;
+        tx->data_len = 196;
+        memset(tx->data, 0x12, 4);
+        memset(tx->data + 4, 0x11, 64);
+        memset(tx->data + 100, 0xff, 32);
+        tx->data[195] = invalid ? 2 : 1;
+        contract_descriptor_t *d = &G_context.tx_info.contract_descriptor;
+        d->verified = true;
+        d->field_count = 3;
+        d->chain_id[31] = 1;
+        memcpy(d->contract, tx->to, ADDRESS_LENGTH);
+        memcpy(d->selector, tx->data, 4);
+        strcpy(d->operation, "Configure account");
+        d->fields[0].kind = CONTRACT_FIELD_ADDRESS;
+        d->fields[1].kind = CONTRACT_FIELD_UINT256;
+        d->fields[2].kind = CONTRACT_FIELD_BOOL;
+        strcpy(d->fields[0].label, "Owner");
+        strcpy(d->fields[1].label, "IntegerField");
+        strcpy(d->fields[2].label, "Enabled");
+        G_context.tx_info.contract_call = true;
+        ui_display_transaction_bs_choice(false, tx);
+        if (invalid) {
+            assert_discarded(SW_BAD_STATE);
+            assert_int_equal(menu_calls, 1);
+            assert_int_equal(review_calls, 0);
+        } else {
+            assert_int_equal(review_calls, 1);
+            assert_non_null(review_callback);
+        }
+    }
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_preparation_failure_returns_home),
         cmocka_unit_test(test_invalid_review_state_returns_home),
         cmocka_unit_test(test_review_status_matches_signature_result),
         cmocka_unit_test(test_rejection_status),
+        cmocka_unit_test(test_contract_review_capacity_and_validation),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

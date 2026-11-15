@@ -126,3 +126,29 @@ add_test(test_crypto_cleanup test_crypto_cleanup)
 
 # Approval review uses token-call classification helpers.
 target_link_libraries(test_transaction_review PRIVATE token_call)
+
+add_library(contract_call ../src/contract_call.c)
+add_executable(test_contract_call test_contract_call.c)
+target_link_libraries(test_contract_call PRIVATE contract_call cmocka gcov)
+add_test(test_contract_call test_contract_call)
+target_link_libraries(test_transaction_review PRIVATE contract_call)
+add_test(NAME test_contract_descriptor_key
+         COMMAND ${TOKEN_METADATA_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/test_contract_descriptor_key.py)
+
+# The contract argument labels use a different rendering policy on Nano.
+add_executable(test_transaction_review_nano
+    test_transaction_review.c
+    ../src/ui/nbgl_display_transaction.c
+    ../src/ui/action/validate.c
+    ../src/helper/request_context.c)
+target_include_directories(test_transaction_review_nano BEFORE PRIVATE mocks ../src/helper ../src/ui/action)
+target_compile_definitions(test_transaction_review_nano PRIVATE TARGET_NANOS2)
+set_property(TARGET test_transaction_review_nano APPEND_STRING PROPERTY LINK_FLAGS
+    " -Wl,--wrap=format_checksummed_address,--wrap=format_qrl_amount,--wrap=multiply_uint8_arrays,--wrap=uint8_array_to_decimal")
+target_link_libraries(test_transaction_review_nano PRIVATE tx_format address_format hashes token_call contract_call cmocka gcov)
+add_test(test_transaction_review_nano test_transaction_review_nano)
+
+add_executable(test_signed_metadata test_signed_metadata.c ../src/signed_metadata.c)
+target_include_directories(test_signed_metadata BEFORE PRIVATE mocks/metadata)
+target_link_libraries(test_signed_metadata PRIVATE cmocka gcov)
+add_test(test_signed_metadata test_signed_metadata)

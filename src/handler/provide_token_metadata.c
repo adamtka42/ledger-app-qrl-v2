@@ -1,8 +1,6 @@
 #include "provide_token_metadata.h"
 
-#include <string.h>
-
-#include "cx.h"
+#include "signed_metadata.h"
 #include "globals.h"
 #include "request_context.h"
 #include "io.h"
@@ -33,27 +31,21 @@ static const uint8_t ISSUER_KEY[] = {TOKEN_METADATA_PUBLIC_KEY_BYTES};
 #ifdef TOKEN_METADATA_HAVE_ISSUER
 _Static_assert(sizeof(ISSUER_KEY) == 65, "issuer key must be an uncompressed SEC1 P-256 point");
 
+_Static_assert(sizeof(TOKEN_METADATA_DOMAIN) - 1 <= SIGNED_METADATA_MAX_DOMAIN_LEN,
+               "metadata domain exceeds verifier workspace");
+_Static_assert(TOKEN_METADATA_FIXED_LEN + TOKEN_SYMBOL_MAX <= SIGNED_METADATA_MAX_BODY_LEN,
+               "metadata body exceeds verifier workspace");
+
 static uint16_t verify_metadata(const uint8_t *data, size_t len, size_t body_len) {
     static const char domain[] = TOKEN_METADATA_DOMAIN;
-    uint8_t message[sizeof(domain) - 1 + TOKEN_METADATA_FIXED_LEN + TOKEN_SYMBOL_MAX];
-    uint8_t digest[32];
-    cx_ecfp_public_key_t public_key;
     if (body_len > TOKEN_METADATA_FIXED_LEN + TOKEN_SYMBOL_MAX) return SW_TOKEN_METADATA_UNTRUSTED;
-    memcpy(message, domain, sizeof(domain) - 1);
-    memcpy(message + sizeof(domain) - 1, data, body_len);
-    if (cx_hash_sha256(message, sizeof(domain) - 1 + body_len, digest, sizeof(digest)) !=
-        sizeof(digest))
-        return SW_TOKEN_METADATA_UNTRUSTED;
-    if (cx_ecfp_init_public_key_no_throw(CX_CURVE_SECP256R1,
-                                         ISSUER_KEY,
-                                         sizeof(ISSUER_KEY),
-                                         &public_key) != CX_OK)
-        return SW_TOKEN_METADATA_UNTRUSTED;
-    return cx_ecdsa_verify_no_throw(&public_key,
-                                    digest,
-                                    sizeof(digest),
-                                    data + body_len,
-                                    len - body_len)
+    return signed_metadata_verify(ISSUER_KEY,
+                                  sizeof(ISSUER_KEY),
+                                  domain,
+                                  sizeof(domain) - 1,
+                                  data,
+                                  len,
+                                  body_len)
                ? SW_OK
                : SW_TOKEN_METADATA_UNTRUSTED;
 }
@@ -75,7 +67,7 @@ static int abort_metadata(uint16_t sw) {
 int handler_provide_token_metadata(const uint8_t *data, size_t len, uint8_t p1, uint8_t p2) {
     if (p1 != 0 || p2 != 0) return abort_metadata(SW_WRONG_P1P2);
     if (G_context.req_type != CONFIRM_TRANSACTION || G_context.state != STATE_RECEIVING ||
-        G_context.tx_info.stream.total_len != 0)
+        G_context.tx_info.stream.total_len != 0 || G_context.tx_info.contract_descriptor.verified)
         return abort_metadata(SW_BAD_STATE);
 
     token_metadata_t *metadata = &G_context.tx_info.token_metadata;

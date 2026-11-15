@@ -30,11 +30,16 @@ class InsType(IntEnum):
     GET_PUBLIC_KEY = 0x05
     SIGN_TX        = 0x06
     PROVIDE_TOKEN_METADATA = 0x0A
+    PROVIDE_CONTRACT_DESCRIPTOR = 0x0B
 
 class Errors(IntEnum):
     SW_TOKEN_METADATA_INVALID  = 0x6A80
     SW_TOKEN_METADATA_UNTRUSTED = 0x6982
     SW_TOKEN_METADATA_NO_ISSUER = 0x6A88
+    SW_CONTRACT_DESCRIPTOR_INVALID = 0x6A80
+    SW_CONTRACT_DESCRIPTOR_UNTRUSTED = 0x6982
+    SW_CONTRACT_DESCRIPTOR_NO_ISSUER = 0x6A88
+    SW_CONTRACT_CALL_MISMATCH   = 0x6A89
     SW_DENY                    = 0x6985
     SW_WRONG_P1P2              = 0x6A86
     SW_WRONG_DATA_LENGTH       = 0x6A87
@@ -103,7 +108,8 @@ class BoilerplateCommandSender:
 
     @contextmanager
     def sign_tx(self, path: str, transaction: bytes,
-                token_metadata: Optional[bytes] = None) -> Generator[None, None, None]:
+                token_metadata: Optional[bytes] = None,
+                contract_descriptor: Optional[bytes] = None) -> Generator[None, None, None]:
         self.backend.exchange(cla=CLA,
                               ins=InsType.SIGN_TX,
                               p1=0x00,
@@ -112,6 +118,9 @@ class BoilerplateCommandSender:
         if token_metadata is not None:
             self.backend.exchange(cla=CLA, ins=InsType.PROVIDE_TOKEN_METADATA,
                                   p1=0, p2=0, data=token_metadata)
+        if contract_descriptor is not None:
+            self.backend.exchange(cla=CLA, ins=InsType.PROVIDE_CONTRACT_DESCRIPTOR,
+                                  p1=0, p2=0, data=contract_descriptor)
         messages = split_message(transaction, MAX_APDU_LEN)
         # idx: int = P1.P1_START + 1
 

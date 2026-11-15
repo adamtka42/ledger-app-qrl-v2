@@ -69,7 +69,7 @@ jobs:
       pull-requests: write
     with:
       download_app_binaries_artifact: "compiled_token_test_app_binaries"
-      test_options: "--token-metadata-test-key"
+      test_options: "--token-metadata-test-key --contract-descriptor-test-key"
       regenerate_snapshots: true
 
   build_token_test_application:
@@ -81,7 +81,7 @@ jobs:
       pull-requests: write
       packages: read
     with:
-      flags: "DEBUG=1 TOKEN_METADATA_TEST_KEY=1"
+      flags: "DEBUG=1 TOKEN_METADATA_TEST_KEY=1 CONTRACT_DESCRIPTOR_TEST_KEY=1"
       upload_app_binaries_artifact: "compiled_token_test_app_binaries"
 
   token_ragger_tests:
@@ -95,5 +95,5 @@ jobs:
       pull-requests: write
     with:
       download_app_binaries_artifact: "compiled_token_test_app_binaries"
-      test_options: "--token-metadata-test-key"
+      test_options: "--token-metadata-test-key --contract-descriptor-test-key"
       regenerate_snapshots: false

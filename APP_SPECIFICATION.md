@@ -316,3 +316,125 @@ The following standard Status Words are returned for all APDUs.
 |   B007   | SW_BAD_STATE                | Security issue with bad state                         |
 |   B008   | SW_SIGNATURE_FAIL           | Signature of raw transaction failed                   |
 |   9000   | OK                          | Success                                               |
+
+## Extensible contract-call clear signing (descriptor V1)
+
+`PROVIDE_CONTRACT_DESCRIPTOR` (`CLA=E0`, `INS=0B`, `P1=P2=0`) supplies a
+signed operation description during a fresh `SIGN_TX` session, after the BIP32
+path (`DATA_FIRST`) and before any transaction bytes. This is a QRL protocol;
+it does not accept Ethereum's STORE/START_FLOW commands or JSON ABI. The
+existing `SIGN_TX` streaming, transaction hash and ML-DSA-87 signature export
+remain unchanged. Review begins at `DATA_LAST`.
+
+The initial profile covers **all arguments, in order**, of a function with one
+to three static 64-byte QRVM ABI words. Supported field types are QRL address
+(`01`, full 64 bytes), uint256 (`02`, upper 32 bytes zero), and bool (`03`, first
+63 bytes zero and last byte 0 or 1). Integers are displayed as exact unscaled
+decimal values, never as token amounts. Arrays, dynamic offsets, strings,
+structs, extra calldata, nonzero native value, contract creation and nonempty
+access lists are outside V1. This is extensible across attested contract
+functions within that profile, not arbitrary ABI decoding.
+
+### Descriptor wire format
+
+All integers in the signed body are big endian; strings are length-prefixed
+ASCII without NUL terminators.
+
+| Field | Bytes | Meaning |
+| --- | --- | --- |
+| Version | 1 | `01` |
+| Chain ID | 32 | Nonzero complete Chain ID, left-padded with zeros |
+| Contract | 64 | Nonzero QRL destination address |
+| Selector | 4 | Exact function selector |
+| Operation length, operation | 1 + 1..24 | Human-readable operation name |
+| Field count | 1 | 1..3 |
+| Fields, in ABI order | variable | Type byte, label length byte, label (1..12 bytes) |
+| Issuer signature | 8..72 | Complete DER ECDSA P-256 signature |
+
+Operation names and labels must begin with an ASCII letter and contain only
+letters, digits, spaces, `_` and `-`, with no trailing space. A descriptor fits
+in a single short APDU (maximum signed body 169 bytes, signature 72 bytes).
+The issuer signs `SHA-256(ASCII("QRL-CONTRACT-DESCRIPTOR-V1") || body)`.
+
+The issuer must attest the contract/network, selector, exact argument types,
+order and actual meaning of every displayed name. A selector alone does not
+establish semantics; collisions and upgradeable contracts require issuer
+policy and descriptor maintenance. Device verification authenticates that
+attestation; it does not inspect on-chain bytecode or contact a node. A wallet
+must obtain signed descriptors, not hold the production issuer private key.
+Descriptors have no expiry or on-chain freshness proof in V1.
+
+On Nano the attested label and its value share the same font, separated by a
+line break. Issuers must choose labels that remain unambiguous in this layout:
+use a descriptive name such as `Limit`, rather than embedding a number or unit
+suffix that could be mistaken for part of the value (for example `Limit 1`).
+
+### Build configuration and failure behavior
+
+`CONTRACT_DESCRIPTOR_PUBLIC_KEY=04<x><y>` configures the production issuer.
+The build validates the P-256 point and rejects the publicly known test key.
+No issuer is trusted by default. This authority is independent from
+`TOKEN_METADATA_PUBLIC_KEY`; enabling token metadata does not enable contract
+descriptors. A debug-only test issuer is available with
+`DEBUG=1 CONTRACT_DESCRIPTOR_TEST_KEY=1` and the device displays
+**TEST contract call**. Test credentials must never attest production contracts.
+
+| Result | Status |
+| --- | --- |
+| Descriptor accepted for the current session | `9000` |
+| Malformed or unsupported descriptor | `6A80` |
+| Invalid issuer signature | `6982` |
+| No contract descriptor issuer configured | `6A88` |
+| Transaction/profile mismatch | `6A89` |
+| Wrong P1/P2 | `6A86` |
+| Wrong order, duplicate descriptor, or mixing token and contract metadata | `B007` |
+
+Every descriptor error or mismatch aborts the session and revokes signature
+export. A successfully authenticated descriptor that does not match the final
+transaction is rejected even with blind signing enabled: no silent downgrade.
+Descriptors cannot survive a new path, rejection, completed signature export,
+or reset. Without a descriptor, ordinary native/token/blind-signing behavior
+continues unchanged.
+
+### Review and manual demonstration
+
+The review shows From, native Amount (`QRL 0` for V1), To (actual contract),
+Operation, all numbered arguments, Chain ID and fees, with optional nonce and
+transaction hash. Numbered argument labels are distinct from device-generated
+fields. On Nano, short `Arg 1`/`Arg 2`/`Arg 3` titles keep the entire attested
+label inside the paginated value, avoiding title truncation. Approval and rejection use the ordinary transaction signing flow;
+Nano also displays the explicit `Sign contract call` confirmation.
+
+Build for Flex in the development container:
+
+```sh
+export BOLOS_SDK="$FLEX_SDK"
+make clean
+make -j4 DEBUG=1 CONTRACT_DESCRIPTOR_TEST_KEY=1
+speculos --model flex --display headless --api-port 5003 --apdu-port 5004 build/flex/bin/app.elf
+```
+
+Run a clean build whenever changing issuer keys, test-key flags or DEBUG: the
+SDK may otherwise reuse objects compiled with earlier settings.
+
+With the emulator already running, use the tests virtual environment on the
+host:
+
+```sh
+tests/venv/bin/python examples/contract_call.py --test-key --url http://127.0.0.1:5003
+```
+
+The example uses a synthetic contract, waits for device approval, verifies the
+returned ML-DSA-87 signature and broadcasts nothing. Use the existing browser
+touch frontend when working over SSH; the API port is not itself a device UI.
+`--dry-run` builds the request without contacting the emulator. `--limit` and
+`--disabled` change the example arguments. Real wallets fetch already signed
+descriptors from an issuer; `--issuer-key` is only an issuer-side development
+convenience.
+
+Device tests: build with both `TOKEN_METADATA_TEST_KEY=1` and
+`CONTRACT_DESCRIPTOR_TEST_KEY=1`, then run
+`pytest tests --device flex --token-metadata-test-key --contract-descriptor-test-key`.
+The default build rejects descriptors with `6A88`; issuer-dependent tests skip
+unless `--contract-descriptor-test-key` requires them, in which case a missing
+issuer fails the suite. CI runs both configurations.
