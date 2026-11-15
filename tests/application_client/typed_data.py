@@ -58,15 +58,25 @@ def _integer(value):
     return value
 
 
-def _value_word(type_name, value, types, depth):
-    if depth > MAX_DEPTH:
-        raise ValueError("Typed data nesting is too deep")
-    if type_name.endswith("[]"):
-        if not isinstance(value, list) or len(value) > MAX_ARRAY:
-            raise ValueError("Expected at most 8 array elements")
-        return keccak256(b"".join(_value_word(type_name[:-2], v, types, depth) for v in value)).ljust(64, b"\0")
-    if type_name in types:
-        return _struct_hash(type_name, value, types, depth + 1).ljust(64, b"\0")
+def _bytes_word(kind, width, value):
+    if kind == "string":
+        if not isinstance(value, str):
+            raise ValueError("Expected text")
+        raw = value.encode("ascii")
+        if len(raw) > MAX_VALUE or raw.count(b"\n") > 16 or any(c != 10 and not 32 <= c <= 126 for c in raw):
+            raise ValueError("Text must be printable ASCII/LF, up to 256 bytes and 16 LF")
+        return keccak256(raw).ljust(64, b"\0")
+    raw = _binary(value)
+    if kind == "bytes":
+        if len(raw) > MAX_VALUE:
+            raise ValueError("Byte value exceeds 256 bytes")
+        return keccak256(raw).ljust(64, b"\0")
+    if len(raw) != width:
+        raise ValueError("Wrong fixed bytes length")
+    return raw.ljust(64, b"\0")
+
+
+def _primitive_word(type_name, value):
     kind, width = _primitive(type_name)
     if kind == "address":
         if isinstance(value, str) and value.startswith("Q"):
@@ -79,22 +89,8 @@ def _value_word(type_name, value, types, depth):
         if not isinstance(value, bool):
             raise ValueError("Expected bool")
         return int(value).to_bytes(64, "big")
-    if kind == "string":
-        if not isinstance(value, str):
-            raise ValueError("Expected text")
-        raw = value.encode("ascii")
-        if len(raw) > MAX_VALUE or raw.count(b"\n") > 16 or any(c != 10 and not 32 <= c <= 126 for c in raw):
-            raise ValueError("Text must be printable ASCII/LF, up to 256 bytes and 16 LF")
-        return keccak256(raw).ljust(64, b"\0")
-    if kind in ("bytes", "fixed"):
-        raw = _binary(value)
-        if kind == "bytes":
-            if len(raw) > MAX_VALUE:
-                raise ValueError("Byte value exceeds 256 bytes")
-            return keccak256(raw).ljust(64, b"\0")
-        if len(raw) != width:
-            raise ValueError("Wrong fixed bytes length")
-        return raw.ljust(64, b"\0")
+    if kind in ("string", "bytes", "fixed"):
+        return _bytes_word(kind, width, value)
     if kind in ("int", "uint"):
         number = _integer(value)
         low, high = (0, 2**width) if kind == "uint" else (-2**(width - 1), 2**(width - 1))
@@ -102,6 +98,18 @@ def _value_word(type_name, value, types, depth):
             raise ValueError("Integer out of declared range")
         return (number % 2**512).to_bytes(64, "big")
     raise ValueError(f"Unsupported type: {type_name}")
+
+
+def _value_word(type_name, value, types, depth):
+    if depth > MAX_DEPTH:
+        raise ValueError("Typed data nesting is too deep")
+    if type_name.endswith("[]"):
+        if not isinstance(value, list) or len(value) > MAX_ARRAY:
+            raise ValueError("Expected at most 8 array elements")
+        return keccak256(b"".join(_value_word(type_name[:-2], v, types, depth) for v in value)).ljust(64, b"\0")
+    if type_name in types:
+        return _struct_hash(type_name, value, types, depth + 1).ljust(64, b"\0")
+    return _primitive_word(type_name, value)
 
 
 def encode_type(type_name, types):
@@ -137,6 +145,36 @@ def typed_data_hash(document):
                      _struct_hash(document["primaryType"], document["message"], document["types"]))
 
 
+def _name_bytes(name):
+    if not isinstance(name, str) or not _NAME.fullmatch(name):
+        raise ValueError("Identifiers must be ASCII, up to 24 characters")
+    raw = name.encode("ascii")
+    return bytes([len(raw)]) + raw
+
+
+def _encode_value(type_name, value, types, depth):
+    if depth > MAX_DEPTH:
+        raise ValueError("Typed data nesting is too deep")
+    if type_name.endswith("[]"):
+        if not isinstance(value, list) or len(value) > MAX_ARRAY:
+            raise ValueError("Expected at most 8 array elements")
+        return bytes([len(value)]) + b"".join(_encode_value(type_name[:-2], v, types, depth) for v in value)
+    if type_name in types:
+        if not isinstance(value, dict) or set(value) != {f["name"] for f in types[type_name]}:
+            raise ValueError("Values must exactly match the schema fields")
+        return b"".join(_encode_value(f["type"], value[f["name"]], types, depth + 1) for f in types[type_name])
+    word = _value_word(type_name, value, types, depth)
+    kind, width = _primitive(type_name)
+    if kind in ("string", "bytes"):
+        raw = value.encode("ascii") if kind == "string" else _binary(value)
+        return len(raw).to_bytes(2, "big") + raw
+    if kind == "bool":
+        return word[-1:]
+    if kind == "fixed":
+        return word[:width]
+    return word
+
+
 def encode_typed_data(document):
     """Encode schema + ordered values, without supplying any precomputed hashes."""
     if set(document) != {"types", "primaryType", "domain", "message"}:
@@ -156,54 +194,28 @@ def encode_typed_data(document):
     if any(document["domain"].get(key) == "" for key in ("name", "version")):
         raise ValueError("Empty domain name/version is not canonical in go-qrl")
 
-    def name_bytes(name):
-        if not isinstance(name, str) or not _NAME.fullmatch(name):
-            raise ValueError("Identifiers must be ASCII, up to 24 characters")
-        raw = name.encode("ascii")
-        return bytes([len(raw)]) + raw
-
     encoded = bytes([1, len(names), names.index(primary)])
     for name, fields in types.items():
         if _primitive(name)[0] is not None:
             raise ValueError("A struct name cannot shadow a primitive")
-        encoded += name_bytes(name) + bytes([len(fields)])
+        encoded += _name_bytes(name) + bytes([len(fields)])
         seen = set()
         for field in fields:
             if set(field) != {"name", "type"} or field["name"] in seen:
                 raise ValueError("Invalid or duplicate schema field")
             seen.add(field["name"])
-            encoded += name_bytes(field["name"])
+            encoded += _name_bytes(field["name"])
             type_name = field["type"]
             base = type_name.removesuffix("[]")
-            name_bytes(base)
+            _name_bytes(base)
             if base not in types and _primitive(base)[0] is None:
                 raise ValueError("Unknown field type")
             raw = type_name.encode("ascii")
             encoded += bytes([len(raw)]) + raw
         encode_type(name, types)
 
-    def encode_value(type_name, value, depth):
-        if depth > MAX_DEPTH:
-            raise ValueError("Typed data nesting is too deep")
-        if type_name.endswith("[]"):
-            if not isinstance(value, list) or len(value) > MAX_ARRAY:
-                raise ValueError("Expected at most 8 array elements")
-            return bytes([len(value)]) + b"".join(encode_value(type_name[:-2], v, depth) for v in value)
-        if type_name in types:
-            if not isinstance(value, dict) or set(value) != {f["name"] for f in types[type_name]}:
-                raise ValueError("Values must exactly match the schema fields")
-            return b"".join(encode_value(f["type"], value[f["name"]], depth + 1) for f in types[type_name])
-        word = _value_word(type_name, value, types, depth)
-        kind, width = _primitive(type_name)
-        if kind in ("string", "bytes"):
-            raw = value.encode("ascii") if kind == "string" else _binary(value)
-            return len(raw).to_bytes(2, "big") + raw
-        if kind == "bool": return word[-1:]
-        if kind == "fixed": return word[:width]
-        return word
-
-    encoded += encode_value(DOMAIN_TYPE, document["domain"], 0)
-    encoded += encode_value(primary, document["message"], 0)
+    encoded += _encode_value(DOMAIN_TYPE, document["domain"], types, 0)
+    encoded += _encode_value(primary, document["message"], types, 0)
     if len(encoded) > MAX_PAYLOAD:
         raise ValueError("Typed-data payload exceeds 4096 bytes")
     return encoded

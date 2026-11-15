@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>  // bool
+#include <stddef.h>   // size_t
 #include "tx_types.h"
 
 #if defined(TARGET_NANOX) || defined(TARGET_NANOS2)
@@ -31,6 +32,11 @@ int ui_display_personal_message(void);
 
 /** Display all QRL typed-data fields and domain context before signing. */
 int ui_display_typed_data(void);
+
+#ifdef SCREEN_SIZE_WALLET
+/** Measure a typed-data fragment that is fully visible without a More view. */
+size_t ui_typed_data_page_length(const char *label, char *text);
+#endif
 
 /**
  * Display transaction information on the device and ask confirmation to sign.

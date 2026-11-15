@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 
 #include "os.h"
@@ -12,7 +13,39 @@
 #include "sw.h"
 #include "validate.h"
 
-/* Field/value fragments are bounded in the parser; none are hidden summaries. */
+#ifdef SCREEN_SIZE_WALLET
+#include "nbgl_fonts.h"
+#include "nbgl_layout.h"
+
+/* Measure with the longest possible fragment suffix. Confirm against NBGL's
+ * layout as well as its font metrics so the entire value is on the review path. */
+size_t ui_typed_data_page_length(const char *label, char *text) {
+    char title[48];
+    int written = snprintf(title,
+                           sizeof(title),
+                           "%s (%u/%u)",
+                           label,
+                           TYPED_DATA_MAX_PAIRS,
+                           TYPED_DATA_MAX_PAIRS);
+    if (written < 0 || (size_t) written >= sizeof(title)) return 0;
+    for (uint8_t lines = NB_MAX_LINES_IN_REVIEW; lines > 0; lines--) {
+        uint16_t length = 0;
+        nbgl_getTextMaxLenInNbLines(LARGE_MEDIUM_FONT, text, AVAILABLE_WIDTH, lines, &length, true);
+        if (length == 0 || length > strlen(text)) return 0;
+        char saved = text[length];
+        text[length] = '\0';
+        nbgl_contentTagValue_t pair = {.item = title, .value = text};
+        nbgl_contentTagValueList_t candidate = {.nbPairs = 1, .pairs = &pair, .wrapping = true};
+        bool needs_details = false;
+        uint8_t pairs_in_page = nbgl_useCaseGetNbTagValuesInPage(1, &candidate, 0, &needs_details);
+        text[length] = saved;
+        if (pairs_in_page == 1 && !needs_details) return length;
+    }
+    return 0;
+}
+#endif
+
+/* Complete values on Nano; mandatory page-sized fragments on touch devices. */
 static nbgl_contentTagValueList_t list;
 static char account[1 + 2 * ADDRESS_SIZE + 1];
 
@@ -42,6 +75,8 @@ __attribute__((noinline)) static bool prepare_pairs(const typed_data_session_t *
     nbgl_contentTagValue_t pairs[MAX_DEVICE_PAIRS + TYPED_DATA_MAX_PAIRS];
     _Static_assert(sizeof(pairs) <= TYPED_DATA_UI_BYTES,
                    "NBGL descriptors exceed temporary storage");
+    _Static_assert(MAX_DEVICE_PAIRS + TYPED_DATA_MAX_PAIRS <= UINT8_MAX,
+                   "review pair index must fit NBGL");
     const char *review = typed_data_review();
     memset(pairs, 0, sizeof(pairs));
     memset(&list, 0, sizeof(list));

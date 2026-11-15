@@ -24,7 +24,7 @@ _Static_assert(sizeof(typed_data_session_t) <= 512,
 bool typed_data_session_init(typed_data_session_t *session, uint32_t length);
 bool typed_data_session_feed(typed_data_session_t *session, const uint8_t *bytes, size_t length);
 /** Parse using a temporary stack workspace, release it before UI/crypto is called. */
-bool typed_data_session_finish(typed_data_session_t *session);
+bool typed_data_session_finish(typed_data_session_t *session, typed_data_page_length_t page_length);
 /** Return the immutable prepared review while a typed-data session is active. */
 const char *typed_data_review(void);
 /** Store immutable NBGL descriptors without keeping a large pair array in RAM. */

@@ -301,8 +301,9 @@ aliases mean 512 bits. Only one-dimensional dynamic arrays are supported.
 Limits: 8 type definitions, 32 fields across the schema, 4 levels of struct
 nesting, 8 elements per array, and 256 bytes per dynamic value. Strings accept
 printable ASCII and at most 16 LF bytes; other UTF-8/control bytes are rejected.
-The combined prepared review is limited to 4096 bytes and 64 pairs. Exceeding
-any limit rejects the request rather than truncating or hiding values.
+The combined prepared review is limited to 4096 bytes and 64 pairs after
+device-specific pagination. Exceeding any limit rejects the request rather
+than truncating or hiding values.
 
 #### Hashing and review
 
@@ -326,9 +327,10 @@ must implement QRL's `QRLTypedDataDomain`/VM64 format. The Go golden vector
 
 Review displays the signing account and primary type, followed by all domain
 and message fields. Full paths, types, array lengths, exact decimal integers,
-checksummed QRL addresses, text and hex bytes are shown in fragments of at most
-64 bytes/two LF. Empty structs/arrays remain visible; text/bytes include their
-byte length. These are regular review pages, not hidden/truncated summaries.
+checksummed QRL addresses, text and hex bytes are shown in full. Nano NBGL
+paginates complete values; Stax and Flex use fragments measured to fit a review
+page without an optional More view. Empty structs/arrays remain visible;
+text/bytes include their byte length. All fragments are regular review pages.
 Definitions and domain names originate from the host; review does not attest a
 dApp's identity or enforce the permissions described by a message.
 

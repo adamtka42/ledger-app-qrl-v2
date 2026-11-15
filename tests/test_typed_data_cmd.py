@@ -1,5 +1,6 @@
 from copy import deepcopy
 import json
+import re
 
 import pytest
 from dilithium_py.ml_dsa import ML_DSA_87
@@ -38,7 +39,8 @@ def array_example():
 def long_example():
     doc = wide_example()
     doc["types"]["WideValues"] = [{"name": "text", "type": "string"}, {"name": "raw", "type": "bytes"}]
-    doc["message"] = {"text": "W" * 240 + "\n" * 16, "raw": "0x" + bytes(range(256)).hex()}
+    doc["message"] = {"text": "W" * 229 + "END OF TEXT" + "\n" * 16,
+                      "raw": "0x" + bytes(range(256)).hex()}
     return doc
 
 
@@ -65,7 +67,7 @@ def send(backend, data=b"", *, p1=2, p2=0):
     ("permission", "approve"), ("wide", "approve"), ("nested", "approve"),
     ("arrays", "approve"), ("long", "approve"), ("deep", "approve"), ("permission", "reject"),
 ])
-def test_typed_data_review(backend, scenario_navigator, sample, decision):
+def test_typed_data_review(backend, scenario_navigator, monkeypatch, sample, decision):
     doc = {"permission": permission_example, "wide": wide_example, "nested": nested_example,
            "arrays": array_example, "long": long_example, "deep": deep_example}[sample]()
     payload = encode_typed_data(doc)
@@ -73,6 +75,27 @@ def test_typed_data_review(backend, scenario_navigator, sample, decision):
     client.get_public_key(PATH)
     public_key = get_public_key_chunks(backend)
     name = f"test_typed_data_{sample}_{decision}"
+    # Every fragment must stay on the mandatory review path on touch devices.
+    screen_texts = []
+    raw_pages = {}
+    compare_snapshot = backend.compare_screen_with_snapshot
+
+    def capture_screen(*args, **kwargs):
+        result = compare_snapshot(*args, **kwargs)
+        texts = [event.get("text", "") for event in backend.get_current_screen_content()["events"]]
+        assert "More" not in texts
+        screen_texts.extend(texts)
+        if sample == "long":
+            for index, text in enumerate(texts):
+                if re.fullmatch(r"raw(?: \(\d+/\d+\))?", text):
+                    value = "".join(t for t in texts[index + 1:]
+                                    if re.fullmatch(r"(?:0x)?[0-9a-f]+", t))
+                    if text in raw_pages:
+                        assert raw_pages[text] == value
+                    raw_pages[text] = value
+        return result
+
+    monkeypatch.setattr(backend, "compare_screen_with_snapshot", capture_screen)
     if decision == "reject":
         with pytest.raises(ExceptionRAPDU) as exc:
             with client.sign_typed_data(PATH, payload):
@@ -84,6 +107,12 @@ def test_typed_data_review(backend, scenario_navigator, sample, decision):
         return
     with client.sign_typed_data(PATH, payload):
         scenario_navigator.review_approve(test_name=name)
+    if sample == "long":
+        # Both the text and the 256-byte hex value must reach their final bytes.
+        visible = "".join(screen_texts)
+        # The marker may cross Nano pages; its final word must still be visible.
+        assert "TEXT" in visible
+        assert "".join(raw_pages.values()) == doc["message"]["raw"]
     for ins in (InsType.SIGN_TX, InsType.SIGN_PERSONAL_MESSAGE):
         with pytest.raises(ExceptionRAPDU) as exc:
             backend.exchange(cla=CLA, ins=ins, p1=2, p2=1)
@@ -148,6 +177,8 @@ def invalid_payload(case):
     elif case == "review_budget":
         doc["types"]["WideValues"] = [{"name": f"field{i}", "type": "uint512"} for i in range(31)]
         doc["message"] = {f"field{i}": str(2**512 - 1) for i in range(31)}
+        doc["types"]["WideValues"][0]["type"] = "uint512[]"
+        doc["message"]["field0"] = [str(2**512 - 1)] * 8
         payload = encode_typed_data(doc)
     else:
         domain = (DOMAIN_TYPE, [("name", "string")])

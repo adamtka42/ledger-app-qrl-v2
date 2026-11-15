@@ -81,7 +81,8 @@ bool typed_data_session_feed(typed_data_session_t *session, const uint8_t *bytes
 
 /* This function must return before address derivation/signing: the crypto engine
  * needs ~20 KiB of stack. Do not inline its temporary parser into the handler. */
-__attribute__((noinline)) bool typed_data_session_finish(typed_data_session_t *session) {
+__attribute__((noinline)) bool typed_data_session_finish(typed_data_session_t *session,
+                                                         typed_data_page_length_t page_length) {
     if (session == NULL || session->finished || N_typed.active[0] != 1 ||
         session->received_len != session->expected_len)
         return false;
@@ -91,10 +92,11 @@ __attribute__((noinline)) bool typed_data_session_finish(typed_data_session_t *s
         !typed_data_feed(&parsed, (const uint8_t *) N_typed.payload, session->received_len))
         goto cleanup;
     zero_nvm(N_typed.payload, sizeof(N_typed.payload));
-    if (!typed_data_finish(&parsed) || !typed_data_name(&parsed,
-                                                        parsed.types[parsed.primary_type].name,
-                                                        session->primary_type,
-                                                        sizeof(session->primary_type)))
+    if (!typed_data_finish(&parsed, page_length) ||
+        !typed_data_name(&parsed,
+                         parsed.types[parsed.primary_type].name,
+                         session->primary_type,
+                         sizeof(session->primary_type)))
         goto cleanup;
     nvm_write((void *) N_typed.review, parsed.review, parsed.review_used);
     memcpy(session->digest, parsed.digest, sizeof(session->digest));

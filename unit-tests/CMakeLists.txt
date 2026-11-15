@@ -122,6 +122,24 @@ target_compile_definitions(test_typed_storage PRIVATE
 target_link_libraries(test_typed_storage PUBLIC typed_data address_format hashes cmocka gcov)
 add_test(test_typed_storage test_typed_storage)
 
+foreach(device touch nano)
+    set(review_target test_typed_data_review_${device})
+    add_executable(${review_target}
+        test_typed_data_review.c
+        ../src/typed_data_storage.c
+        ../src/ui/nbgl_display_typed_data.c)
+    target_include_directories(${review_target} BEFORE PRIVATE mocks ../src/helper ../src/ui/action)
+    target_compile_definitions(${review_target} PRIVATE
+        TYPED_DATA_VECTOR_FILE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/typed_data.txt")
+    if(device STREQUAL "touch")
+        target_compile_definitions(${review_target} PRIVATE TARGET_FLEX SCREEN_SIZE_WALLET)
+    else()
+        target_compile_definitions(${review_target} PRIVATE TARGET_NANOX)
+    endif()
+    target_link_libraries(${review_target} PRIVATE typed_data address_format hashes cmocka gcov)
+    add_test(${review_target} ${review_target})
+endforeach()
+
 # Exercise real crypto code with mocked Ledger syscalls and observed erasure.
 add_executable(test_crypto_cleanup
     test_crypto_cleanup.c

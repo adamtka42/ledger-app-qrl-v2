@@ -18,7 +18,10 @@
 #define TYPED_DATA_WORD_LEN     64 /* one QRVM word */
 #define TYPED_DATA_HEADER_LEN   3  /* version, type count, primary type index */
 #define TYPED_DATA_MAX_NEWLINES 16
-#define TYPED_DATA_REVIEW_PART  64
+
+/* Return a positive prefix length fitting one mandatory review page. A callback
+ * may temporarily terminate text for layout measurement, but must restore it. */
+typedef size_t (*typed_data_page_length_t)(const char *label, char *text);
 
 typedef struct {
     uint16_t offset;
@@ -77,13 +80,15 @@ typedef struct {
     bool has_chain_id;
     bool has_verifying_contract;
     bool finished;
+    typed_data_page_length_t review_page_length;
 } typed_data_t;
 
 /** Start a bounded, versioned schema-and-values payload; no host digest is accepted. */
 bool typed_data_init(typed_data_t *data, uint32_t length);
 /** Receive an exact fragment of the declared payload. */
 bool typed_data_feed(typed_data_t *data, const uint8_t *bytes, size_t length);
-/** Validate schema/values, build a complete review and compute the QRL digest. */
-bool typed_data_finish(typed_data_t *data);
+/** Validate/hash and build the review. NULL leaves whole values for Nano NBGL;
+ * otherwise page_length bounds every fragment without changing the signed data. */
+bool typed_data_finish(typed_data_t *data, typed_data_page_length_t page_length);
 /** Copy a schema identifier into a NUL-terminated output buffer. */
 bool typed_data_name(const typed_data_t *data, typed_span_t name, char *out, size_t size);

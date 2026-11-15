@@ -44,11 +44,7 @@ static void review_is_complete(void) {
         assert_true(data.pairs[i].label < data.review_used);
         assert_true(data.pairs[i].value < data.review_used);
         const char *value = data.review + data.pairs[i].value;
-        assert_true(strlen(value) <= TYPED_DATA_REVIEW_PART);
-        size_t newlines = 0;
-        for (const char *p = value; *p; p++)
-            if (*p == '\n') newlines++;
-        assert_true(newlines <= 2);
+        assert_true(strlen(value) <= 2 * TYPED_DATA_MAX_VALUE + 2);
     }
 }
 
@@ -68,10 +64,10 @@ static void test_go_vectors(void **state) {
         size_t length = vector(names[i], bytes, digest);
         assert_true(typed_data_init(&data, length));
         assert_true(typed_data_feed(&data, bytes, length));
-        assert_true(typed_data_finish(&data));
+        assert_true(typed_data_finish(&data, NULL));
         assert_memory_equal(data.digest, digest, 32);
         review_is_complete();
-        assert_false(typed_data_finish(&data));
+        assert_false(typed_data_finish(&data, NULL));
         assert_false(typed_data_feed(&data, NULL, 0));
     }
 }
@@ -84,7 +80,7 @@ static void test_all_stream_splits(void **state) {
         assert_true(typed_data_init(&data, length));
         assert_true(typed_data_feed(&data, bytes, split));
         assert_true(typed_data_feed(&data, bytes + split, length - split));
-        assert_true(typed_data_finish(&data));
+        assert_true(typed_data_finish(&data, NULL));
         assert_memory_equal(data.digest, digest, 32);
     }
 }
@@ -96,12 +92,12 @@ static void test_truncation_and_trailing_data(void **state) {
     for (size_t prefix = 3; prefix < length; prefix++) {
         assert_true(typed_data_init(&data, prefix));
         assert_true(typed_data_feed(&data, bytes, prefix));
-        assert_false(typed_data_finish(&data));
+        assert_false(typed_data_finish(&data, NULL));
     }
     bytes[length] = 0;
     assert_true(typed_data_init(&data, length + 1));
     assert_true(typed_data_feed(&data, bytes, length + 1));
-    assert_false(typed_data_finish(&data));
+    assert_false(typed_data_finish(&data, NULL));
 }
 
 static void test_canonical_values_and_limits(void **state) {
@@ -111,17 +107,17 @@ static void test_canonical_values_and_limits(void **state) {
     bytes[length - 1] = 2;
     assert_true(typed_data_init(&data, length));
     assert_true(typed_data_feed(&data, bytes, length));
-    assert_false(typed_data_finish(&data));
+    assert_false(typed_data_finish(&data, NULL));
     length = vector("uint8", bytes, digest);
     bytes[length - 2] = 1;  // 511 does not fit the declared uint8.
     assert_true(typed_data_init(&data, length));
     assert_true(typed_data_feed(&data, bytes, length));
-    assert_false(typed_data_finish(&data));
+    assert_false(typed_data_finish(&data, NULL));
     length = vector("permission", bytes, digest);
     bytes[0] = 2;  // Unsupported format version.
     assert_true(typed_data_init(&data, length));
     assert_true(typed_data_feed(&data, bytes, length));
-    assert_false(typed_data_finish(&data));
+    assert_false(typed_data_finish(&data, NULL));
     assert_false(typed_data_init(NULL, 10));
     assert_false(typed_data_init(&data, 0));
     assert_false(typed_data_init(&data, TYPED_DATA_MAX_PAYLOAD + 1));
@@ -129,7 +125,115 @@ static void test_canonical_values_and_limits(void **state) {
     assert_false(typed_data_feed(&data, NULL, 1));
     assert_false(typed_data_feed(&data, bytes, 4));
     assert_int_equal(data.received_len, 0);
-    assert_false(typed_data_finish(&data));
+    assert_false(typed_data_finish(&data, NULL));
+}
+
+static size_t short_page(const char *label, char *text) {
+    assert_non_null(label);
+    size_t length = strlen(text);
+    return length < 80 ? length : 80;
+}
+
+static size_t invalid_page_length;
+
+static size_t invalid_page(const char *label, char *text) {
+    (void) label;
+    (void) text;
+    return invalid_page_length;
+}
+
+static void test_pagination_preserves_values_and_hash(void **state) {
+    (void) state;
+    const char *names[] = {"permission", "long_values", "nested", "arrays", "primitives"};
+    uint8_t bytes[TYPED_DATA_MAX_PAYLOAD], digest[32];
+    typed_data_t whole;
+    for (size_t sample = 0; sample < sizeof(names) / sizeof(names[0]); sample++) {
+        size_t length = vector(names[sample], bytes, digest);
+        assert_true(typed_data_init(&whole, length));
+        assert_true(typed_data_feed(&whole, bytes, length));
+        assert_true(typed_data_finish(&whole, NULL));
+        assert_true(typed_data_init(&data, length));
+        assert_true(typed_data_feed(&data, bytes, length));
+        assert_true(typed_data_finish(&data, short_page));
+        assert_memory_equal(data.digest, digest, sizeof(digest));
+        assert_memory_equal(data.payload, bytes, length);
+
+        size_t next = 0;
+        for (size_t i = 0; i < whole.pair_count; i++) {
+            const char *label = whole.review + whole.pairs[i].label;
+            const char *value = whole.review + whole.pairs[i].value;
+            size_t remaining = strlen(value), parts = (remaining + 79) / 80;
+            for (size_t part = 0; part < parts; part++) {
+                assert_true(next < data.pair_count);
+                const char *fragment = data.review + data.pairs[next].value;
+                size_t count = strlen(fragment);
+                assert_true(count > 0 && count <= 80 && count <= remaining);
+                assert_memory_equal(fragment, value, count);
+                char expected_label[48];
+                if (parts == 1)
+                    snprintf(expected_label, sizeof(expected_label), "%s", label);
+                else
+                    snprintf(expected_label,
+                             sizeof(expected_label),
+                             "%s (%u/%u)",
+                             label,
+                             (unsigned) part + 1,
+                             (unsigned) parts);
+                assert_string_equal(data.review + data.pairs[next].label, expected_label);
+                next++;
+                value += count;
+                remaining -= count;
+            }
+            assert_int_equal(remaining, 0);
+        }
+        assert_int_equal(next, data.pair_count);
+    }
+}
+
+static void test_invalid_page_lengths_fail_closed(void **state) {
+    (void) state;
+    uint8_t bytes[TYPED_DATA_MAX_PAYLOAD], digest[32];
+    size_t length = vector("permission", bytes, digest);
+    const size_t invalid[] = {0, SIZE_MAX, 1};  // One-byte pages exceed the pair budget.
+    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        invalid_page_length = invalid[i];
+        assert_true(typed_data_init(&data, length));
+        assert_true(typed_data_feed(&data, bytes, length));
+        assert_false(typed_data_finish(&data, invalid_page));
+        assert_false(data.finished);
+        assert_memory_equal(data.payload, bytes, length);
+    }
+}
+
+static size_t extra_pages;
+
+static size_t fill_pair_budget(const char *label, char *text) {
+    if (strcmp(label, "text") == 0 && extra_pages != 0) {
+        extra_pages--;
+        return 1;
+    }
+    return strlen(text);
+}
+
+static void test_review_pair_budget_boundary(void **state) {
+    (void) state;
+    uint8_t bytes[TYPED_DATA_MAX_PAYLOAD], digest[32];
+    size_t length = vector("long_values", bytes, digest);
+    assert_true(typed_data_init(&data, length));
+    assert_true(typed_data_feed(&data, bytes, length));
+    assert_true(typed_data_finish(&data, NULL));
+    size_t room = TYPED_DATA_MAX_PAIRS - data.pair_count;
+    for (size_t overflow = 0; overflow <= 1; overflow++) {
+        extra_pages = room + overflow;
+        assert_true(typed_data_init(&data, length));
+        assert_true(typed_data_feed(&data, bytes, length));
+        bool success = typed_data_finish(&data, fill_pair_budget);
+        assert_int_equal(success, overflow == 0);
+        if (success) {
+            assert_int_equal(data.pair_count, TYPED_DATA_MAX_PAIRS);
+            assert_memory_equal(data.digest, digest, sizeof(digest));
+        }
+    }
 }
 
 int main(void) {
@@ -138,6 +242,9 @@ int main(void) {
         cmocka_unit_test(test_all_stream_splits),
         cmocka_unit_test(test_truncation_and_trailing_data),
         cmocka_unit_test(test_canonical_values_and_limits),
+        cmocka_unit_test(test_pagination_preserves_values_and_hash),
+        cmocka_unit_test(test_invalid_page_lengths_fail_closed),
+        cmocka_unit_test(test_review_pair_budget_boundary),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
