@@ -137,6 +137,8 @@ foreach(device touch nano)
         target_compile_definitions(${review_target} PRIVATE TARGET_NANOX)
     endif()
     target_link_libraries(${review_target} PRIVATE typed_data address_format hashes cmocka gcov)
+    set_property(TARGET ${review_target} APPEND_STRING PROPERTY LINK_FLAGS
+        " -Wl,--wrap=format_checksummed_address,--wrap=typed_data_store_ui")
     add_test(${review_target} ${review_target})
 endforeach()
 

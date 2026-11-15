@@ -44,6 +44,13 @@ def long_example():
     return doc
 
 
+def negative_example():
+    doc = wide_example()
+    doc["types"]["WideValues"] = [{"name": "amount", "type": "int512"}]
+    doc["message"] = {"amount": -(2**511)}
+    return doc
+
+
 def deep_example():
     doc = wide_example()
     doc["types"]["WideValues"] = [{"name": "one", "type": "A"}]
@@ -110,12 +117,14 @@ def send(backend, data=b"", *, p1=2, p2=0):
 @pytest.mark.parametrize("sample,decision", [
     ("permission", "approve"), ("wide", "approve"), ("nested", "approve"),
     ("arrays", "approve"), ("long", "approve"), ("deep", "approve"),
-    ("account_field", "approve"), ("identifiers", "approve"), ("permission", "reject"),
+    ("account_field", "approve"), ("identifiers", "approve"),
+    ("negative", "approve"), ("permission", "reject"),
 ])
 def test_typed_data_review(backend, scenario_navigator, monkeypatch, sample, decision):
     doc = {"permission": permission_example, "wide": wide_example, "nested": nested_example,
            "arrays": array_example, "long": long_example, "deep": deep_example,
-           "account_field": account_field_example, "identifiers": identifier_example}[sample]()
+           "account_field": account_field_example, "identifiers": identifier_example,
+           "negative": negative_example}[sample]()
     payload = encode_typed_data(doc)
     client = BoilerplateCommandSender(backend)
     client.get_public_key(PATH)
@@ -130,6 +139,7 @@ def test_typed_data_review(backend, scenario_navigator, monkeypatch, sample, dec
         result = compare_snapshot(*args, **kwargs)
         texts = [event.get("text", "") for event in backend.get_current_screen_content()["events"]]
         assert "More" not in texts
+        assert not any(re.search(r"\(\d+/\d+\).*\(\d+/\d+\)", text) for text in texts)
         screen_texts.extend(texts)
         if sample == "long":
             for index, text in enumerate(texts):
@@ -178,6 +188,52 @@ def test_typed_data_review(backend, scenario_navigator, monkeypatch, sample, dec
     with pytest.raises(ExceptionRAPDU) as exc:
         send(backend, p2=1)
     assert exc.value.status == Errors.SW_BAD_STATE
+
+
+@pytest.mark.parametrize("kind,value", [
+    ("int128", -(2**127)), ("int256", -(2**255)), ("int512", -(2**511)),
+    ("string", "-" + "63739682910296196688" * 6),
+    ("string", "_" + "63739682910296196688" * 6),
+    ("string", " " + "63739682910296196688" * 6),
+    ("string", "Line\n_" + "63739682910296196688" * 6),
+    ("string", "W" * 229 + "END OF TEXT" + "\n" * 16),
+    ("string", "\n" * 16 + "_" + "63739682910296196688" * 6),
+], ids=["minimum_int128", "minimum_int256", "minimum_int512", "hyphen", "underscore", "space", "line_start",
+        "trailing_lf", "leading_lf"])
+def test_typed_data_rendered_value(backend, scenario_navigator, monkeypatch, kind, value):
+    field = "text" if kind == "string" else "amount"
+    doc = wide_example()
+    doc["types"]["WideValues"] = [{"name": field, "type": kind}]
+    doc["message"] = {field: value}
+    client = BoilerplateCommandSender(backend)
+    client.get_public_key(PATH)
+    public_key = get_public_key_chunks(backend)
+    pages = {}
+    compare_text = backend.compare_screen_with_text
+
+    def capture_page(pattern):
+        texts = [event.get("text", "") for event in backend.get_current_screen_content()["events"]]
+        assert "More" not in texts
+        assert not any(re.search(r"\(\d+/\d+\).*\(\d+/\d+\)", text) for text in texts)
+        for index, title in enumerate(texts):
+            if re.fullmatch(rf"{field}(?: \(\d+/\d+\))?", title):
+                # Footer controls are not part of the field. Keep all value
+                # characters, including spaces, and ignore visual line breaks.
+                rendered = "".join(text for text in texts[index + 1:]
+                                   if text != "Reject" and not re.fullmatch(r"\d+ of \d+", text))
+                if title in pages:
+                    assert pages[title] == rendered
+                pages[title] = rendered
+        return compare_text(pattern)
+
+    monkeypatch.setattr(backend, "compare_screen_with_text", capture_page)
+    with client.sign_typed_data(PATH, encode_typed_data(doc)):
+        scenario_navigator.review_approve(do_comparison=False)
+    expected = str(value).replace("\n", "")
+    displayed = "".join(pages.values()).replace("\n", "")
+    assert displayed == expected, (len(displayed), len(expected), pages)
+    signature = get_signature_chunks(backend, client.get_async_response().data, ins=InsType.SIGN_TYPED_DATA)
+    assert ML_DSA_87.verify(public_key, typed_data_hash(doc), signature, ctx=SIGNING_CONTEXT)
 
 
 @pytest.mark.parametrize("which", ["chain", "contract", "name", "version", "spender", "limit", "nonce", "type"])

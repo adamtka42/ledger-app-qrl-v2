@@ -58,12 +58,7 @@ int handler_sign_typed_data(buffer_t *data, uint8_t p1, uint8_t p2) {
     }
     if (message->received_len != message->expected_len)
         return abort_typed_data(SW_WRONG_DATA_LENGTH);
-#ifdef SCREEN_SIZE_WALLET
-    typed_data_page_length_t page_length = ui_typed_data_page_length;
-#else
-    typed_data_page_length_t page_length = NULL;
-#endif
-    if (!typed_data_session_finish(message, page_length))
+    if (!typed_data_session_finish(message, ui_typed_data_page_length))
         return abort_typed_data(SW_TYPED_DATA_INVALID);
     G_context.state = STATE_PARSED;
     return ui_display_typed_data();

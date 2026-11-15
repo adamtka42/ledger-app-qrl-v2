@@ -281,6 +281,11 @@ static size_t invalid_page(const char *label, char *text) {
     return invalid_page_length;
 }
 
+static size_t oversized_page(const char *label, char *text) {
+    (void) label;
+    return strlen(text) + 1;
+}
+
 static void test_pagination_preserves_values_and_hash(void **state) {
     (void) state;
     const char *names[] = {"permission", "long_values", "nested", "arrays", "primitives"};
@@ -342,6 +347,13 @@ static void test_invalid_page_lengths_fail_closed(void **state) {
         assert_false(data.finished);
         assert_memory_equal(data.payload, bytes, length);
     }
+    /* Unlike SIZE_MAX, this fits in the review buffer, so only the remaining-
+     * text guard can reject it before a malformed fragment is accepted. */
+    assert_true(typed_data_init(&data, length));
+    assert_true(typed_data_feed(&data, bytes, length));
+    assert_false(typed_data_finish(&data, oversized_page));
+    assert_false(data.finished);
+    assert_memory_equal(data.payload, bytes, length);
 }
 
 static size_t extra_pages;
