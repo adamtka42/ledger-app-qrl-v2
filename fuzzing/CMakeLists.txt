@@ -40,11 +40,13 @@ string(REPLACE " " ";" FUZZ_LINK_FLAGS ${FUZZ_LINK_FLAGS_})
 
 include(extra/TxParser.cmake)
 include(extra/TxFormat.cmake)
+include(extra/TypedData.cmake)
 
 target_compile_options(txparser PRIVATE ${FUZZ_COMPILE_FLAGS})
 target_compile_options(txformat PRIVATE ${FUZZ_COMPILE_FLAGS})
 target_compile_options(txparser PRIVATE -fno-sanitize-recover=undefined)
 target_compile_options(txformat PRIVATE -fno-sanitize-recover=undefined)
+target_compile_options(typeddata PRIVATE ${FUZZ_COMPILE_FLAGS} -fno-sanitize-recover=undefined)
 
 add_executable(fuzz_tx_parser fuzz_tx_parser.c)
 
@@ -59,3 +61,8 @@ target_compile_options(fuzz_tx_format PRIVATE ${FUZZ_COMPILE_FLAGS})
 target_compile_options(fuzz_tx_format PRIVATE -fno-sanitize-recover=undefined)
 target_link_options(fuzz_tx_format PRIVATE ${FUZZ_LINK_FLAGS})
 target_link_libraries(fuzz_tx_format PUBLIC txformat)
+
+add_executable(fuzz_typed_data fuzz_typed_data.c)
+target_compile_options(fuzz_typed_data PRIVATE ${FUZZ_COMPILE_FLAGS} -fno-sanitize-recover=undefined)
+target_link_options(fuzz_typed_data PRIVATE ${FUZZ_LINK_FLAGS})
+target_link_libraries(fuzz_typed_data PUBLIC typeddata)
