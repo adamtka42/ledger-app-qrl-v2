@@ -54,6 +54,25 @@ def deep_example():
     return doc
 
 
+def account_field_example():
+    doc = permission_example()
+    doc["types"]["SpendingPermission"][0]["name"] = "Account"
+    doc["message"]["Account"] = doc["message"].pop("spender")
+    return doc
+
+
+def identifier_example():
+    doc = nested_example()
+    doc["types"] = {
+        DOMAIN_TYPE: doc["types"][DOMAIN_TYPE],
+        "Mail_1": [{"name": "_from", "type": "Person_2[]"}, {"name": "_contents", "type": "string"}],
+        "Person_2": [{"name": "_name", "type": "string"}, {"name": "wallet_2", "type": "address"}],
+    }
+    doc["primaryType"] = "Mail_1"
+    doc["message"] = {"_from": [{"_name": "Alice", "wallet_2": "Q" + "11" * 64}], "_contents": "Hello"}
+    return doc
+
+
 def start(backend, length, path=PATH):
     return backend.exchange(cla=CLA, ins=InsType.SIGN_TYPED_DATA, p1=0, p2=0,
                             data=pack_derivation_path(path) + length.to_bytes(4, "big"))
@@ -65,11 +84,13 @@ def send(backend, data=b"", *, p1=2, p2=0):
 
 @pytest.mark.parametrize("sample,decision", [
     ("permission", "approve"), ("wide", "approve"), ("nested", "approve"),
-    ("arrays", "approve"), ("long", "approve"), ("deep", "approve"), ("permission", "reject"),
+    ("arrays", "approve"), ("long", "approve"), ("deep", "approve"),
+    ("account_field", "approve"), ("identifiers", "approve"), ("permission", "reject"),
 ])
 def test_typed_data_review(backend, scenario_navigator, monkeypatch, sample, decision):
     doc = {"permission": permission_example, "wide": wide_example, "nested": nested_example,
-           "arrays": array_example, "long": long_example, "deep": deep_example}[sample]()
+           "arrays": array_example, "long": long_example, "deep": deep_example,
+           "account_field": account_field_example, "identifiers": identifier_example}[sample]()
     payload = encode_typed_data(doc)
     client = BoilerplateCommandSender(backend)
     client.get_public_key(PATH)
@@ -107,6 +128,9 @@ def test_typed_data_review(backend, scenario_navigator, monkeypatch, sample, dec
         return
     with client.sign_typed_data(PATH, payload):
         scenario_navigator.review_approve(test_name=name)
+    if sample == "account_field":
+        assert any(re.fullmatch(r"Sign with(?: \(\d+/\d+\))?", text) for text in screen_texts)
+        assert any(re.fullmatch(r"Account(?: \(\d+/\d+\))?", text) for text in screen_texts)
     if sample == "long":
         # Both the text and the 256-byte hex value must reach their final bytes.
         visible = "".join(screen_texts)
@@ -145,6 +169,25 @@ def test_typed_data_digest_binds_each_field(which):
     assert typed_data_hash(doc) != digest
 
 
+@pytest.mark.parametrize("case", ["primary", "nested", "array", "unused", "reference"])
+def test_encoder_rejects_underscore_type_names(case):
+    doc = nested_example()
+    if case == "primary":
+        doc["types"]["_Mail"] = doc["types"].pop("Mail")
+        doc["primaryType"] = "_Mail"
+    elif case in ("nested", "array"):
+        doc["types"]["_Inner"] = doc["types"].pop("Person")
+        doc["types"]["Mail"][0]["type"] = "_Inner[]" if case == "array" else "_Inner"
+        if case == "array":
+            doc["message"]["from"] = [doc["message"]["from"]]
+    elif case == "unused":
+        doc["types"]["_Unused"] = []
+    else:
+        doc["types"]["Mail"][0]["type"] = "_Inner"
+    with pytest.raises(ValueError, match="Type names must start with an ASCII letter"):
+        encode_typed_data(doc)
+
+
 def unchecked_schema(types, primary=1):
     result = bytes([1, len(types), primary])
     for name, fields in types:
@@ -180,6 +223,22 @@ def invalid_payload(case):
         doc["types"]["WideValues"][0]["type"] = "uint512[]"
         doc["message"]["field0"] = [str(2**512 - 1)] * 8
         payload = encode_typed_data(doc)
+    elif case.startswith("underscore_"):
+        # Encode a complete valid document first, then bypass the host validator.
+        # Equal-length substitutions preserve lengths, references and value bytes.
+        doc = nested_example()
+        if case == "underscore_array":
+            doc["types"]["Mail"][0]["type"] = "Person[]"
+            doc["message"]["from"] = [doc["message"]["from"]]
+        if case == "underscore_unused":
+            doc["types"]["Spare"] = []
+        original, replacement = {
+            "underscore_primary": (b"Mail", b"_ail"),
+            "underscore_nested": (b"Person", b"_Inner"),
+            "underscore_array": (b"Person", b"_Inner"),
+            "underscore_unused": (b"Spare", b"_pare"),
+        }[case]
+        payload = encode_typed_data(doc).replace(original, replacement)
     else:
         domain = (DOMAIN_TYPE, [("name", "string")])
         variants = {
@@ -188,6 +247,7 @@ def invalid_payload(case):
             "duplicate_type": [domain, ("A", []), ("A", [])],
             "duplicate_field": [domain, ("A", [("same", "bool"), ("same", "bool")])],
             "bad_identifier": [domain, ("A", [("bad\nname", "bool")])],
+            "device_label": [domain, ("A", [("Sign with", "address")])],
             "bad_width": [domain, ("A", [("bad", "uint7")])],
             "fixed_array": [domain, ("A", [("bad", "uint256[2]")])],
             "ethereum_domain": [("EIP712Domain", [("name", "string")]), ("A", [])],
@@ -202,8 +262,9 @@ def invalid_payload(case):
 
 @pytest.mark.parametrize("case", ["hash_only", "ethereum_preimage", "version", "primary", "trailing",
     "truncated", "bad_text", "integer_padding", "bool", "review_budget", "cycle", "unknown",
-    "duplicate_type", "duplicate_field", "bad_identifier", "bad_width", "fixed_array",
-    "ethereum_domain", "domain_type", "shadow_type", "deep_schema"])
+    "duplicate_type", "duplicate_field", "bad_identifier", "device_label", "bad_width", "fixed_array",
+    "ethereum_domain", "domain_type", "shadow_type", "deep_schema",
+    "underscore_primary", "underscore_nested", "underscore_array", "underscore_unused"])
 def test_invalid_typed_data_aborts(backend, case):
     payload = invalid_payload(case)
     with pytest.raises(ExceptionRAPDU) as exc:

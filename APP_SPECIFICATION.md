@@ -275,7 +275,8 @@ message_values:      values of primary_type_index, in schema order
 ```
 
 The schema must contain `QRLTypedDataDomain` and a separate primary type.
-Type and field identifiers match `[A-Za-z_][A-Za-z0-9_]*`, up to 24 bytes;
+Type names match `[A-Za-z][A-Za-z0-9_]*`; field names match
+`[A-Za-z_][A-Za-z0-9_]*`. Both are limited to 24 bytes;
 duplicate types/fields, primitive-name shadowing, unknown references and cycles
 are rejected. Definitions may be transmitted in any order; dependency names
 are sorted when calculating each type hash.
@@ -326,10 +327,11 @@ must implement QRL's `QRLTypedDataDomain`/VM64 format. The Go golden vector
 `054b04b5b0976d8b58cb06fb10c1100af45cf46488d16842897e6b2a81ed6ed3`.
 
 Review displays the signing account and primary type, followed by all domain
-and message fields. Full paths, types, array lengths, exact decimal integers,
-checksummed QRL addresses, text and hex bytes are shown in full. Nano NBGL
-paginates complete values; Stax and Flex use fragments measured to fit a review
-page without an optional More view. Empty structs/arrays remain visible;
+and message fields. The device's account row is labelled "Sign with",
+distinct from host-defined field names. Full paths, types, array lengths,
+exact decimal integers, checksummed QRL addresses, text and hex bytes are
+shown in full. Nano NBGL paginates complete values; Stax and Flex use fragments
+measured to fit a review page without an optional More view. Empty structs/arrays remain visible;
 text/bytes include their byte length. All fragments are regular review pages.
 Definitions and domain names originate from the host; review does not attest a
 dApp's identity or enforce the permissions described by a message.

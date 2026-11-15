@@ -128,6 +128,83 @@ static void test_canonical_values_and_limits(void **state) {
     assert_false(typed_data_finish(&data, NULL));
 }
 
+static void append_name(uint8_t *bytes, size_t *length, const char *name) {
+    size_t count = strlen(name);
+    assert_true(count <= UINT8_MAX);
+    assert_true(*length + 1 + count <= TYPED_DATA_MAX_PAYLOAD);
+    bytes[(*length)++] = (uint8_t) count;
+    memcpy(bytes + *length, name, count);
+    *length += count;
+}
+
+/* Include complete values and array counts so the underscore regression cases
+ * exercise name validation rather than failing on truncated payloads. */
+static size_t identifier_payload(uint8_t bytes[TYPED_DATA_MAX_PAYLOAD],
+                                 const char *primary,
+                                 const char *inner,
+                                 const char *reference,
+                                 const char *field) {
+    bytes[0] = 1;
+    bytes[1] = 3;
+    bytes[2] = 1;
+    size_t length = 3;
+    append_name(bytes, &length, "QRLTypedDataDomain");
+    bytes[length++] = 1;
+    append_name(bytes, &length, "name");
+    append_name(bytes, &length, "string");
+    append_name(bytes, &length, primary);
+    bytes[length++] = 1;
+    append_name(bytes, &length, field);
+    append_name(bytes, &length, reference);
+    append_name(bytes, &length, inner);
+    bytes[length++] = 1;
+    append_name(bytes, &length, "_enabled");
+    append_name(bytes, &length, "bool");
+    bytes[length++] = 0;
+    bytes[length++] = 1;
+    bytes[length++] = 'D';
+    size_t reference_length = strlen(reference);
+    if (reference_length >= 2 && strcmp(reference + reference_length - 2, "[]") == 0)
+        bytes[length++] = 1;
+    bytes[length++] = 1;
+    return length;
+}
+
+static void test_type_and_field_identifiers(void **state) {
+    (void) state;
+    const struct {
+        const char *primary;
+        const char *inner;
+        const char *reference;
+        const char *field;
+        bool valid;
+    } cases[] = {
+        {"Outer", "Inner", "Inner", "value", true},
+        {"Outer_1", "Inner_2", "Inner_2", "_value", true},
+        {"Outer_1", "Inner_2", "Inner_2[]", "_value", true},
+        {"_Outer", "Inner", "Inner", "value", false},
+        {"Outer", "_Inner", "_Inner", "value", false},
+        {"Outer", "_Inner", "_Inner[]", "value", false},
+        {"Outer", "_Unused", "bool", "value", false},
+        {"Outer", "Inner", "_Inner", "value", false},
+        {"Outer", "Inner", "_Inner[]", "value", false},
+        {"Outer[]", "Inner", "Inner", "value", false},
+        {"1Outer", "Inner", "Inner", "value", false},
+    };
+    uint8_t bytes[TYPED_DATA_MAX_PAYLOAD];
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        size_t length = identifier_payload(bytes,
+                                           cases[i].primary,
+                                           cases[i].inner,
+                                           cases[i].reference,
+                                           cases[i].field);
+        assert_true(typed_data_init(&data, length));
+        assert_true(typed_data_feed(&data, bytes, length));
+        assert_int_equal(typed_data_finish(&data, NULL), cases[i].valid);
+        assert_int_equal(data.finished, cases[i].valid);
+    }
+}
+
 static size_t short_page(const char *label, char *text) {
     assert_non_null(label);
     size_t length = strlen(text);
@@ -242,6 +319,7 @@ int main(void) {
         cmocka_unit_test(test_all_stream_splits),
         cmocka_unit_test(test_truncation_and_trailing_data),
         cmocka_unit_test(test_canonical_values_and_limits),
+        cmocka_unit_test(test_type_and_field_identifiers),
         cmocka_unit_test(test_pagination_preserves_values_and_hash),
         cmocka_unit_test(test_invalid_page_lengths_fail_closed),
         cmocka_unit_test(test_review_pair_budget_boundary),

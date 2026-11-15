@@ -50,8 +50,14 @@ static int compare(const typed_data_t *data, typed_span_t a, typed_span_t b) {
     return order != 0 ? order : (int) a.length - (int) b.length;
 }
 
-static bool identifier(const uint8_t *name, size_t length) {
+typedef enum { NAME_FIELD, NAME_TYPE, NAME_TYPE_REFERENCE } name_kind_t;
+
+static bool identifier(const uint8_t *name, size_t length, bool type_name) {
     if (length == 0 || length > TYPED_DATA_MAX_NAME) return false;
+    /* go-qrl reference types must start with an ASCII letter. Field names may
+     * still start with '_'; applying the same rule to them would reject valid data. */
+    if (type_name && !((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z')))
+        return false;
     for (size_t i = 0; i < length; i++) {
         uint8_t c = name[i];
         if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' ||
@@ -61,7 +67,7 @@ static bool identifier(const uint8_t *name, size_t length) {
     return true;
 }
 
-static bool read_name(typed_data_t *data, typed_span_t *out, bool type) {
+static bool read_name(typed_data_t *data, typed_span_t *out, name_kind_t kind) {
     uint8_t length;
     if (!byte(data, &length)) return false;
     out->offset = (uint16_t) data->cursor;
@@ -69,8 +75,9 @@ static bool read_name(typed_data_t *data, typed_span_t *out, bool type) {
     const uint8_t *p = take(data, length);
     if (p == NULL) return false;
     size_t base = length;
-    if (type && base >= 2 && p[base - 2] == '[' && p[base - 1] == ']') base -= 2;
-    return identifier(p, base);
+    if (kind == NAME_TYPE_REFERENCE && base >= 2 && p[base - 2] == '[' && p[base - 1] == ']')
+        base -= 2;
+    return identifier(p, base, kind != NAME_FIELD);
 }
 
 static bool classify(typed_data_t *data, typed_field_t *field, bool references) {
@@ -203,7 +210,7 @@ static bool schema(typed_data_t *data) {
     data->domain_type = UINT8_MAX;
     for (uint8_t i = 0; i < data->type_count; i++) {
         typed_type_t *type = &data->types[i];
-        if (!read_name(data, &type->name, false) || !byte(data, &type->field_count) ||
+        if (!read_name(data, &type->name, NAME_TYPE) || !byte(data, &type->field_count) ||
             type->field_count > TYPED_DATA_MAX_FIELDS - data->field_count)
             return false;
         for (uint8_t j = 0; j < i; j++) {
@@ -213,7 +220,8 @@ static bool schema(typed_data_t *data) {
         type->first_field = data->field_count;
         for (uint8_t j = 0; j < type->field_count; j++) {
             typed_field_t *field = &data->fields[data->field_count++];
-            if (!read_name(data, &field->name, false) || !read_name(data, &field->type_name, true))
+            if (!read_name(data, &field->name, NAME_FIELD) ||
+                !read_name(data, &field->type_name, NAME_TYPE_REFERENCE))
                 return false;
             for (size_t k = 0; k < j; k++) {
                 if (compare(data, field->name, data->fields[type->first_field + k].name) == 0)
