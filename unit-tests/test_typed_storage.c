@@ -70,7 +70,7 @@ static void test_stage_parse_erase(void **state) {
     assert_true(typed_data_session_feed(&session, bytes, length));
     uint8_t *raw = payload_region;
     assert_memory_equal(raw, bytes, length);
-    assert_true(typed_data_session_finish(&session));
+    assert_true(typed_data_session_finish(&session, NULL));
     assert_memory_equal(session.digest, digest, 32);
     assert_string_equal(session.primary_type, "WideValues");
     assert_true(zero(raw, TYPED_DATA_MAX_PAYLOAD));
@@ -84,7 +84,7 @@ static void test_stage_parse_erase(void **state) {
     assert_true(typed_data_store_ui(ui, sizeof(ui)));
     assert_memory_equal(typed_data_ui(), ui, sizeof(ui));
     assert_false(typed_data_session_feed(&session, bytes, 1));
-    assert_false(typed_data_session_finish(&session));
+    assert_false(typed_data_session_finish(&session, NULL));
     typed_data_storage_clear();
     assert_true(zero(review, TYPED_DATA_REVIEW_BYTES));
     assert_true(zero(typed_data_ui(), TYPED_DATA_UI_BYTES));
@@ -113,7 +113,7 @@ static void test_restart_and_replacement(void **state) {
     assert_false(typed_data_session_feed(&second, NULL, 1));
     assert_false(typed_data_session_feed(&second, bytes, length + 1));
     assert_int_equal(second.received_len, 0);
-    assert_false(typed_data_session_finish(&second));
+    assert_false(typed_data_session_finish(&second, NULL));
     typed_data_storage_clear();
 }
 

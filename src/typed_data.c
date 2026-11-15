@@ -264,20 +264,21 @@ static bool store(typed_data_t *data, const char *text, size_t length, uint16_t 
     return true;
 }
 
-static bool review_parts(typed_data_t *data, const char *label, const char *text, size_t length) {
-    size_t offsets[TYPED_DATA_MAX_VALUE / TYPED_DATA_REVIEW_PART + 16 / 2 + 2];
-    size_t lengths[sizeof(offsets) / sizeof(offsets[0])], count = 0, pos = 0;
+static bool review_parts(typed_data_t *data, const char *label, char *text, size_t length) {
+    uint16_t lengths[TYPED_DATA_MAX_PAIRS];
+    size_t count = 0, pos = 0;
     do {
-        if (count >= sizeof(offsets) / sizeof(offsets[0])) return false;
-        offsets[count] = pos;
-        size_t start = pos, lines = 0;
-        while (pos < length && pos - start < TYPED_DATA_REVIEW_PART) {
-            if (text[pos++] == '\n' && ++lines == 2) break;
+        if (count + data->pair_count >= TYPED_DATA_MAX_PAIRS) return false;
+        size_t part = length - pos;
+        if (data->review_page_length != NULL && part != 0) {
+            part = data->review_page_length(label, text + pos);
+            if (part == 0 || part > length - pos) return false;
         }
-        lengths[count++] = pos - start;
+        lengths[count++] = (uint16_t) part;
+        pos += part;
     } while (pos < length);
+    pos = 0;
     for (size_t i = 0; i < count; i++) {
-        if (data->pair_count >= TYPED_DATA_MAX_PAIRS) return false;
         typed_review_pair_t *pair = &data->pairs[data->pair_count++];
         char title[48];
         if (count == 1)
@@ -285,8 +286,9 @@ static bool review_parts(typed_data_t *data, const char *label, const char *text
         else
             snprintf(title, sizeof(title), "%s (%u/%u)", label, (unsigned) i + 1, (unsigned) count);
         if (!store(data, title, strlen(title), &pair->label) ||
-            !store(data, text + offsets[i], lengths[i], &pair->value))
+            !store(data, text + pos, lengths[i], &pair->value))
             return false;
+        pos += lengths[i];
     }
     return true;
 }
@@ -336,7 +338,7 @@ static void decimal(const uint8_t word[64], bool negative, char *out) {
 static bool add_field(typed_data_t *data,
                       const typed_field_t *field,
                       const char *path,
-                      const char *value,
+                      char *value,
                       size_t value_length,
                       size_t raw_length) {
     if (data->value_count == UINT8_MAX) return false;
@@ -530,11 +532,12 @@ bool typed_data_feed(typed_data_t *data, const uint8_t *bytes, size_t length) {
     return true;
 }
 
-bool typed_data_finish(typed_data_t *data) {
+bool typed_data_finish(typed_data_t *data, typed_data_page_length_t page_length) {
     if (data == NULL || data->finished || data->expected_len < 3 ||
         data->expected_len > TYPED_DATA_MAX_PAYLOAD || data->received_len != data->expected_len)
         return false;
     data->cursor = 0;
+    data->review_page_length = page_length;
     if (!schema(data)) return false;
     uint8_t preimage[66] = {0x19, 0x01};
     char path[TYPED_DATA_MAX_PATH] = "domain";
