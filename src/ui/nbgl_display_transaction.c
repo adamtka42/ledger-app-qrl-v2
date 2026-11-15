@@ -51,10 +51,14 @@ static char g_nonce[21];
 static char g_gas_limit[21];
 static char g_gas_tip_cap[TX_FORMAT_MAX_AMOUNT_LEN + 5];
 static char g_tx_hash[65];
+static char g_contract_values[CONTRACT_CALL_MAX_FIELDS]
+                             [CONTRACT_CALL_LABEL_MAX + 1 + ADDRESS_SIZE * 2 + 2];
+static char g_contract_labels[CONTRACT_CALL_MAX_FIELDS][CONTRACT_CALL_LABEL_MAX + 4];
 
 // Maximum review fields: From/Owner, Amount/Spending limit, To/Spender or Operation, Token
 // contract, Chain ID, Gas limit, Priority fee / gas, Max fees, Nonce, Transaction hash.
-enum { MAX_REVIEW_PAIRS = 10 };
+// Contract calls add Operation and up to three numbered arguments to native fields.
+enum { MAX_REVIEW_PAIRS = 10 + CONTRACT_CALL_MAX_FIELDS };
 static nbgl_contentTagValue_t pairs[MAX_REVIEW_PAIRS];
 static nbgl_contentTagValueList_t pairList;
 
@@ -112,6 +116,44 @@ static bool format_token_amount(const token_call_t *token,
     char integer[TX_FORMAT_MAX_DECIMAL_DIGITS + 1];
     return uint8_array_to_decimal(token->amount, sizeof(token->amount), integer, sizeof(integer)) &&
            format_with_decimals(integer, metadata->decimals, out, size);
+}
+
+// Argument i of a described contract call, typed as its descriptor says, with
+// its label in g_contract_labels[i] and its value in g_contract_values[i].
+static uint16_t format_contract_argument(const zond_tx_t *tx,
+                                         const contract_descriptor_t *descriptor,
+                                         size_t i) {
+    const contract_field_t *field = &descriptor->fields[i];
+    const uint8_t *word = abi_arg(tx->data, i);
+    char *value = g_contract_values[i];
+    const size_t size = sizeof(g_contract_values[i]);
+    if (field->kind == CONTRACT_FIELD_ADDRESS) {
+        if (!format_checksummed_address(word, value, size)) return SW_DISPLAY_ADDRESS_FAIL;
+    } else if (field->kind == CONTRACT_FIELD_UINT256) {
+        if (!uint8_array_to_decimal(word + ABI_UINT256_OFFSET, MAX_FIELD_SIZE, value, size))
+            return SW_DISPLAY_AMOUNT_FAIL;
+    } else {
+        strcpy(value, word[ABI_WORD_LEN - 1] ? "true" : "false");
+    }
+#ifndef SCREEN_SIZE_WALLET
+    // Nano truncates long titles, including their pagination suffix.
+    // Keep a short device title and show the complete attested label in the value.
+    const size_t label_len = strlen(field->label);
+    const size_t value_len = strlen(value);
+    if (label_len + 1 + value_len >= size) return SW_BAD_STATE;
+    memmove(value + label_len + 1, value, value_len + 1);
+    memcpy(value, field->label, label_len);
+    value[label_len] = '\n';
+    snprintf(g_contract_labels[i], sizeof(g_contract_labels[i]), "Arg %u", (unsigned) (i + 1));
+#else
+    // Numbered labels cannot impersonate device fields such as From or Max fees.
+    snprintf(g_contract_labels[i],
+             sizeof(g_contract_labels[i]),
+             "%u. %s",
+             (unsigned) (i + 1),
+             field->label);
+#endif
+    return SW_OK;
 }
 
 // called when long press button on 3rd page is long-touched or when reject footer is touched
@@ -175,6 +217,11 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         return abort_display(SW_BAD_STATE);
     }
     const bool is_contract_creation = (tx->to_len == 0);
+    const bool is_contract = G_context.tx_info.contract_call;
+    const contract_descriptor_t *descriptor = &G_context.tx_info.contract_descriptor;
+    if (is_contract && (is_blind_signed || !contract_call_matches(tx, descriptor))) {
+        return abort_display(SW_BAD_STATE);
+    }
     const token_call_t *token = &G_context.tx_info.token_call;
     const token_metadata_t *metadata = &G_context.tx_info.token_metadata;
     const bool is_token = token->kind != TOKEN_CALL_NONE;
@@ -195,6 +242,15 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
 #else
         review_title = "Send tokens";
 #endif
+    }
+
+    if (is_contract) {
+#ifdef CONTRACT_DESCRIPTOR_TEST_KEY
+        review_title = "TEST contract call";
+#else
+        review_title = "Review contract call";
+#endif
+        confirmation_title = "Sign contract call";
     }
 
     print_tx_utils(tx);
@@ -292,6 +348,14 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         // Nano cuts the middle out of the longer title once a page counter is added.
         ADD_PAIR("Contract", g_token_contract);
 #endif
+    }
+    if (is_contract) {
+        ADD_PAIR("Operation", descriptor->operation);
+        for (size_t i = 0; i < descriptor->field_count; i++) {
+            const uint16_t sw = format_contract_argument(tx, descriptor, i);
+            if (sw != SW_OK) return abort_display(sw);
+            ADD_PAIR(g_contract_labels[i], g_contract_values[i]);
+        }
     }
     ADD_PAIR("Chain ID", g_chain_id);
     ADD_PAIR("Gas limit", g_gas_limit);

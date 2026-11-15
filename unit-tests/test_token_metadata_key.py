@@ -31,7 +31,7 @@ class IssuerBuildTests(unittest.TestCase):
     def build_config(self, *settings):
         env = os.environ.copy()
         for name in list(env):
-            if name.startswith("TOKEN_METADATA_") or name in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
+            if name.startswith(("TOKEN_METADATA_", "CONTRACT_DESCRIPTOR_")) or name in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
                 del env[name]
         return subprocess.run(
             ["make", "--no-print-directory", "-f", "Makefile", "print_issuer",
