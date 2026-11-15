@@ -48,7 +48,7 @@ cx_err_t address_from_bip32_path(const uint32_t path[],
                                  uint8_t address[ADDRESS_SIZE]) {
     (void) path;
     (void) path_len;
-    memset(address, 0x11, ADDRESS_SIZE);
+    memset(address, 0x33, ADDRESS_SIZE);
     return CX_OK;
 }
 
@@ -169,7 +169,7 @@ static void test_review_roundtrip(void **state) {
         assert_memory_equal(session->digest, whole.digest, sizeof(whole.digest));
         size_t extra = 2 + !session->has_chain_id + !session->has_verifying_contract;
         assert_int_equal(review->nbPairs, extra + session->pair_count);
-        assert_string_equal(review->pairs[0].item, "Account");
+        assert_string_equal(review->pairs[0].item, "Sign with");
         assert_int_equal(strlen(review->pairs[0].value), 1 + 2 * ADDRESS_SIZE);
 #ifndef SCREEN_SIZE_WALLET
         assert_int_equal(session->pair_count, whole.pair_count);
@@ -235,10 +235,53 @@ static void test_layout_rejection_restores_text(void **state) {
 #endif
 }
 
+static void test_schema_account_is_distinct_from_signer(void **state) {
+    (void) state;
+    reset_request_context();
+    uint8_t bytes[TYPED_DATA_MAX_PAYLOAD];
+    size_t length = vector("permission", bytes);
+    size_t renamed = 0;
+    for (size_t i = 0; i + 7 <= length; i++) {
+        if (memcmp(bytes + i, "spender", 7) == 0) {
+            memcpy(bytes + i, "Account", 7);
+            renamed++;
+        }
+    }
+    assert_int_equal(renamed, 1);
+    typed_data_session_t *session = &G_context.typed_data;
+    assert_true(typed_data_session_init(session, length));
+    assert_true(typed_data_session_feed(session, bytes, length));
+    assert_true(typed_data_session_finish(session, page_length()));
+    G_context.req_type = CONFIRM_TYPED_DATA;
+    G_context.state = STATE_PARSED;
+    assert_int_equal(ui_display_typed_data(), 0);
+    assert_string_equal(review->pairs[0].item, "Sign with");
+
+    uint8_t field_address[ADDRESS_SIZE];
+    memset(field_address, 0x11, sizeof(field_address));
+    char field_text[1 + 2 * ADDRESS_SIZE + 1], signing_text[sizeof(field_text)];
+    assert_true(format_checksummed_address(field_address, field_text, sizeof(field_text)));
+    assert_true(format_checksummed_address(G_context.address, signing_text, sizeof(signing_text)));
+    assert_string_equal(review->pairs[0].value, signing_text);
+    assert_string_not_equal(signing_text, field_text);
+    size_t found = 0;
+    for (size_t i = 1; i < review->nbPairs; i++) {
+        const nbgl_contentTagValue_t *pair = &review->pairs[i];
+        assert_string_not_equal(pair->item, "Sign with");
+        if (strcmp(pair->item, "Account") == 0) {
+            assert_string_equal(pair->value, field_text);
+            found++;
+        }
+    }
+    assert_int_equal(found, 1);
+    reset_request_context();
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_review_roundtrip),
         cmocka_unit_test(test_layout_rejection_restores_text),
+        cmocka_unit_test(test_schema_account_is_distinct_from_signer),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

@@ -81,7 +81,8 @@ __attribute__((noinline)) static bool prepare_pairs(const typed_data_session_t *
     memset(pairs, 0, sizeof(pairs));
     memset(&list, 0, sizeof(list));
     size_t count = 0;
-    pairs[count].item = "Account";
+    /* Schema identifiers cannot contain the space in this device-owned label. */
+    pairs[count].item = "Sign with";
     pairs[count++].value = account;
     pairs[count].item = "Primary type";
     pairs[count++].value = data->primary_type;

@@ -12,6 +12,7 @@ MAX_ARRAY = 8
 MAX_VALUE = 256
 PATH = "m/44'/238'/0'/0/0"
 _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,23}\Z")
+_TYPE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,23}\Z")
 _INTEGER = re.compile(r"(u?int)([1-9][0-9]*)?\Z")
 _FIXED = re.compile(r"bytes([1-9][0-9]*)\Z")
 _DOMAIN_FIELDS = [("name", "string"), ("version", "string"), ("chainId", "uint256"),
@@ -145,8 +146,11 @@ def typed_data_hash(document):
                      _struct_hash(document["primaryType"], document["message"], document["types"]))
 
 
-def _name_bytes(name):
-    if not isinstance(name, str) or not _NAME.fullmatch(name):
+def _name_bytes(name, *, type_name=False):
+    pattern = _TYPE_NAME if type_name else _NAME
+    if not isinstance(name, str) or not pattern.fullmatch(name):
+        if type_name:
+            raise ValueError("Type names must start with an ASCII letter and contain up to 24 identifier characters")
         raise ValueError("Identifiers must be ASCII, up to 24 characters")
     raw = name.encode("ascii")
     return bytes([len(raw)]) + raw
@@ -198,7 +202,7 @@ def encode_typed_data(document):
     for name, fields in types.items():
         if _primitive(name)[0] is not None:
             raise ValueError("A struct name cannot shadow a primitive")
-        encoded += _name_bytes(name) + bytes([len(fields)])
+        encoded += _name_bytes(name, type_name=True) + bytes([len(fields)])
         seen = set()
         for field in fields:
             if set(field) != {"name", "type"} or field["name"] in seen:
@@ -207,7 +211,7 @@ def encode_typed_data(document):
             encoded += _name_bytes(field["name"])
             type_name = field["type"]
             base = type_name.removesuffix("[]")
-            _name_bytes(base)
+            _name_bytes(base, type_name=True)
             if base not in types and _primitive(base)[0] is None:
                 raise ValueError("Unknown field type")
             raw = type_name.encode("ascii")
