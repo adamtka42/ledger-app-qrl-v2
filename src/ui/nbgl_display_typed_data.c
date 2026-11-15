@@ -13,12 +13,11 @@
 #include "sw.h"
 #include "validate.h"
 
-#ifdef SCREEN_SIZE_WALLET
 #include "nbgl_fonts.h"
 #include "nbgl_layout.h"
 
-/* Measure with the longest possible fragment suffix. Confirm against NBGL's
- * layout as well as its font metrics so the entire value is on the review path. */
+/* Measure with the longest possible fragment suffix. Each fragment must fit
+ * one page: Nano's automatic page offsets can repeat separator-led text. */
 size_t ui_typed_data_page_length(const char *label, char *text) {
     char title[48];
     int written = snprintf(title,
@@ -28,6 +27,7 @@ size_t ui_typed_data_page_length(const char *label, char *text) {
                            TYPED_DATA_MAX_PAIRS,
                            TYPED_DATA_MAX_PAIRS);
     if (written < 0 || (size_t) written >= sizeof(title)) return 0;
+#ifdef SCREEN_SIZE_WALLET
     for (uint8_t lines = NB_MAX_LINES_IN_REVIEW; lines > 0; lines--) {
         uint16_t length = 0;
         nbgl_getTextMaxLenInNbLines(LARGE_MEDIUM_FONT, text, AVAILABLE_WIDTH, lines, &length, true);
@@ -42,15 +42,36 @@ size_t ui_typed_data_page_length(const char *label, char *text) {
         if (pairs_in_page == 1 && !needs_details) return length;
     }
     return 0;
-}
+#else
+    for (uint8_t lines = NB_MAX_LINES_IN_REVIEW; lines > 0; lines--) {
+        uint16_t length = 0;
+        nbgl_getTextMaxLenInNbLines(BAGL_FONT_OPEN_SANS_REGULAR_11px_1bpp,
+                                    text,
+                                    AVAILABLE_WIDTH,
+                                    lines,
+                                    &length,
+                                    true);
+        if (length == 0 || length > strlen(text)) return 0;
+        char saved = text[length];
+        text[length] = '\0';
+        uint8_t pages = nbgl_getTextNbPagesInWidth(BAGL_FONT_OPEN_SANS_REGULAR_11px_1bpp,
+                                                   text,
+                                                   NB_MAX_LINES_IN_REVIEW,
+                                                   AVAILABLE_WIDTH);
+        text[length] = saved;
+        if (pages == 1) return length;
+    }
+    return 0;
 #endif
+}
 
-/* Complete values on Nano; mandatory page-sized fragments on touch devices. */
+/* Immutable descriptors for mandatory, device-sized review fragments. */
 static nbgl_contentTagValueList_t list;
 static char account[1 + 2 * ADDRESS_SIZE + 1];
 
 static int abort_display(uint16_t status) {
     reset_request_context();
+    ui_menu_main();
     return io_send_sw(status);
 }
 

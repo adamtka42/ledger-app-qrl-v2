@@ -348,8 +348,9 @@ Review displays the signing account and primary type, followed by all domain
 and message fields. The device's account row is labelled "Sign with",
 distinct from host-defined field names. Full paths, types, array lengths,
 exact decimal integers, checksummed QRL addresses, text and hex bytes are
-shown in full. Nano NBGL paginates complete values; Stax and Flex use fragments
-measured to fit a review page without an optional More view. Empty structs/arrays remain visible;
+shown in full. The app measures fragments to fit one review page on each device,
+without an optional More view or automatic value pagination on Nano.
+Empty structs/arrays remain visible;
 text/bytes include their byte length. All fragments are regular review pages.
 Definitions and domain names originate from the host; review does not attest a
 dApp's identity or enforce the permissions described by a message.

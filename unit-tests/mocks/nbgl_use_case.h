@@ -48,7 +48,11 @@ void nbgl_useCaseReviewBlindSigning(int type,
 void nbgl_useCaseReviewStatus(int status, void (*done)(void));
 void nbgl_useCaseStatus(const char *text, bool success, void (*done)(void));
 
+#ifdef SCREEN_SIZE_WALLET
 #define NB_MAX_LINES_IN_REVIEW 9u
+#else
+#define NB_MAX_LINES_IN_REVIEW 3u
+#endif
 uint8_t nbgl_useCaseGetNbTagValuesInPage(uint8_t nbPairs,
                                          const nbgl_contentTagValueList_t *list,
                                          uint8_t startIndex,

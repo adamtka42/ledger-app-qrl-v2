@@ -94,8 +94,8 @@ _Static_assert(sizeof(typed_data_t) <= TYPED_DATA_MAX_WORKSPACE_BYTES,
 bool typed_data_init(typed_data_t *data, uint32_t length);
 /** Receive an exact fragment of the declared payload. */
 bool typed_data_feed(typed_data_t *data, const uint8_t *bytes, size_t length);
-/** Validate/hash and build the review. NULL leaves whole values for Nano NBGL;
- * otherwise page_length bounds every fragment without changing the signed data. */
+/** Validate/hash and build the review. page_length bounds each device fragment;
+ * NULL retains whole values for host-side tools without changing the digest. */
 bool typed_data_finish(typed_data_t *data, typed_data_page_length_t page_length);
 /** Copy a schema identifier into a NUL-terminated output buffer. */
 bool typed_data_name(const typed_data_t *data, typed_span_t name, char *out, size_t size);
