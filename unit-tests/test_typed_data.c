@@ -205,6 +205,68 @@ static void test_type_and_field_identifiers(void **state) {
     }
 }
 
+static size_t shared_depth_payload(uint8_t bytes[TYPED_DATA_MAX_PAYLOAD],
+                                   bool over_depth,
+                                   bool reverse_fields,
+                                   int array_count) {
+    bytes[0] = 1;
+    bytes[1] = over_depth ? 6 : 5;
+    bytes[2] = 1;
+    size_t length = 3;
+    append_name(bytes, &length, "QRLTypedDataDomain");
+    bytes[length++] = 1;
+    append_name(bytes, &length, "name");
+    append_name(bytes, &length, "string");
+    append_name(bytes, &length, "Root");
+    bytes[length++] = 2;
+    for (size_t i = 0; i < 2; i++) {
+        bool shallow = reverse_fields ? i == 1 : i == 0;
+        append_name(bytes, &length, shallow ? "shallow" : "deep");
+        append_name(bytes, &length, shallow ? "Shared" : "A");
+    }
+    append_name(bytes, &length, "A");
+    bytes[length++] = 1;
+    append_name(bytes, &length, "next");
+    append_name(bytes, &length, over_depth ? "B" : "Shared");
+    append_name(bytes, &length, "Shared");
+    bytes[length++] = 1;
+    append_name(bytes, &length, "leaf");
+    append_name(bytes, &length, array_count < 0 ? "Leaf" : "Leaf[]");
+    append_name(bytes, &length, "Leaf");
+    bytes[length++] = 0;
+    if (over_depth) {
+        append_name(bytes, &length, "B");
+        bytes[length++] = 1;
+        append_name(bytes, &length, "next");
+        append_name(bytes, &length, "Shared");
+    }
+    bytes[length++] = 0;
+    bytes[length++] = 1;
+    bytes[length++] = 'D';
+    if (array_count >= 0) {
+        bytes[length++] = (uint8_t) array_count;
+        bytes[length++] = (uint8_t) array_count;
+    }
+    return length;
+}
+
+static void test_shared_type_depth_limit(void **state) {
+    (void) state;
+    uint8_t bytes[TYPED_DATA_MAX_PAYLOAD];
+    for (int over_depth = 0; over_depth <= 1; over_depth++) {
+        for (int reverse_fields = 0; reverse_fields <= 1; reverse_fields++) {
+            for (int array_count = -1; array_count <= 1; array_count++) {
+                size_t length =
+                    shared_depth_payload(bytes, over_depth, reverse_fields, array_count);
+                assert_true(typed_data_init(&data, length));
+                assert_true(typed_data_feed(&data, bytes, length));
+                assert_int_equal(typed_data_finish(&data, NULL), !over_depth);
+                assert_int_equal(data.finished, !over_depth);
+            }
+        }
+    }
+}
+
 static size_t short_page(const char *label, char *text) {
     assert_non_null(label);
     size_t length = strlen(text);
@@ -320,6 +382,7 @@ int main(void) {
         cmocka_unit_test(test_truncation_and_trailing_data),
         cmocka_unit_test(test_canonical_values_and_limits),
         cmocka_unit_test(test_type_and_field_identifiers),
+        cmocka_unit_test(test_shared_type_depth_limit),
         cmocka_unit_test(test_pagination_preserves_values_and_hash),
         cmocka_unit_test(test_invalid_page_lengths_fail_closed),
         cmocka_unit_test(test_review_pair_budget_boundary),

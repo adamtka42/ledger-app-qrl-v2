@@ -73,6 +73,31 @@ def identifier_example():
     return doc
 
 
+def shared_depth_example(over_depth, reverse_fields, reverse_types, array_count):
+    """Reach Shared first by a short path, then by a longer path near the limit."""
+    reference = "Leaf" if array_count is None else "Leaf[]"
+    leaf_value = {} if array_count is None else [{} for _ in range(array_count)]
+    shared = {"leaf": leaf_value}
+    fields = [{"name": "shallow", "type": "Shared"}, {"name": "deep", "type": "A"}]
+    if reverse_fields:
+        fields.reverse()
+    types = {
+        DOMAIN_TYPE: [{"name": "name", "type": "string"}],
+        "Root": fields,
+        "A": [{"name": "next", "type": "B" if over_depth else "Shared"}],
+        "Shared": [{"name": "leaf", "type": reference}],
+        "Leaf": [],
+    }
+    deep = {"next": deepcopy(shared)}
+    if over_depth:
+        types["B"] = [{"name": "next", "type": "Shared"}]
+        deep = {"next": deep}
+    if reverse_types:
+        types = dict(reversed(list(types.items())))
+    return {"types": types, "primaryType": "Root", "domain": {"name": "Depth test"},
+            "message": {"shallow": shared, "deep": deep}}
+
+
 def start(backend, length, path=PATH):
     return backend.exchange(cla=CLA, ins=InsType.SIGN_TYPED_DATA, p1=0, p2=0,
                             data=pack_derivation_path(path) + length.to_bytes(4, "big"))
@@ -156,9 +181,9 @@ def test_typed_data_review(backend, scenario_navigator, monkeypatch, sample, dec
 
 
 @pytest.mark.parametrize("which", ["chain", "contract", "name", "version", "spender", "limit", "nonce", "type"])
-def test_typed_data_digest_binds_each_field(which):
+def test_typed_data_digest_binds_each_field(backend, scenario_navigator, which):
     doc = permission_example()
-    digest = typed_data_hash(doc)
+    original_digest = typed_data_hash(doc)
     if which in ("chain", "contract", "name", "version"):
         key = {"chain": "chainId", "contract": "verifyingContract"}.get(which, which)
         doc["domain"][key] = "Q" + "33" * 64 if which == "contract" else doc["domain"][key] + "2"
@@ -166,7 +191,18 @@ def test_typed_data_digest_binds_each_field(which):
         doc["types"]["SpendingPermission"][1]["type"] = "uint512"
     else:
         doc["message"][which] = "Q" + "33" * 64 if which == "spender" else str(int(doc["message"][which]) + 1)
-    assert typed_data_hash(doc) != digest
+    client = BoilerplateCommandSender(backend)
+    client.get_public_key(PATH)
+    public_key = get_public_key_chunks(backend)
+    with client.sign_typed_data(PATH, encode_typed_data(doc)):
+        # Screen layout is covered by test_typed_data_review; this test checks
+        # that each changed field actually reaches the device's signed digest.
+        scenario_navigator.review_approve(do_comparison=False)
+    signature = get_signature_chunks(backend, client.get_async_response().data, ins=InsType.SIGN_TYPED_DATA)
+    changed_digest = typed_data_hash(doc)
+    assert changed_digest != original_digest
+    assert ML_DSA_87.verify(public_key, changed_digest, signature, ctx=SIGNING_CONTEXT)
+    assert not ML_DSA_87.verify(public_key, original_digest, signature, ctx=SIGNING_CONTEXT)
 
 
 @pytest.mark.parametrize("case", ["primary", "nested", "array", "unused", "reference"])
@@ -196,6 +232,43 @@ def unchecked_schema(types, primary=1):
             for text in (field, type_name):
                 result += bytes([len(text)]) + text.encode()
     return result
+
+
+@pytest.mark.parametrize("over_depth", [False, True])
+@pytest.mark.parametrize("reverse_fields", [False, True])
+@pytest.mark.parametrize("reverse_types", [False, True])
+@pytest.mark.parametrize("array_count", [None, 0, 1])
+def test_shared_type_depth_limit(backend, scenario_navigator, over_depth, reverse_fields,
+                                 reverse_types, array_count):
+    doc = shared_depth_example(over_depth, reverse_fields, reverse_types, array_count)
+    names = list(doc["types"])
+    # Construct wire data independently so invalid documents reach the device
+    # even after the client encoder correctly rejects them.
+    schema = [(name, [(field["name"], field["type"]) for field in fields])
+              for name, fields in doc["types"].items()]
+    domain = doc["domain"]["name"].encode("ascii")
+    payload = unchecked_schema(schema, primary=names.index("Root")) + len(domain).to_bytes(2, "big") + domain
+    if array_count is not None:
+        payload += bytes([array_count, array_count])  # Each Shared contains one Leaf[]; Leaf has no fields.
+    client = BoilerplateCommandSender(backend)
+    if over_depth:
+        with pytest.raises(ValueError, match="Cyclic/deep type graph"):
+            encode_typed_data(doc)
+        with pytest.raises(ExceptionRAPDU) as exc:
+            with client.sign_typed_data(PATH, payload):
+                pass
+        assert exc.value.status == Errors.SW_TYPED_DATA_INVALID
+        with pytest.raises(ExceptionRAPDU) as exc:
+            send(backend, p2=1)
+        assert exc.value.status == Errors.SW_BAD_STATE
+    else:
+        assert encode_typed_data(doc) == payload
+        client.get_public_key(PATH)
+        public_key = get_public_key_chunks(backend)
+        with client.sign_typed_data(PATH, payload):
+            scenario_navigator.review_approve(do_comparison=False)
+        signature = get_signature_chunks(backend, client.get_async_response().data, ins=InsType.SIGN_TYPED_DATA)
+        assert ML_DSA_87.verify(public_key, typed_data_hash(doc), signature, ctx=SIGNING_CONTEXT)
 
 
 def invalid_payload(case):
