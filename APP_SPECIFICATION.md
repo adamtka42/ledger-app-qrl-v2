@@ -439,3 +439,135 @@ Device tests: build with both `TOKEN_METADATA_TEST_KEY=1` and
 The default build rejects descriptors with `6A88`; issuer-dependent tests skip
 unless `--contract-descriptor-test-key` requires them, in which case a missing
 issuer fails the suite. CI runs both configurations.
+
+## Clear signing of Zond staking deposits
+
+The existing `SIGN_TX` command recognizes the canonical QRVM call
+`deposit(bytes,bytes,bytes,bytes,bytes32)` (selector `c1da06e2`) only for an
+explicitly pinned Chain ID and contract. No additional APDU or signed host
+metadata is required. Token/contract descriptors cannot be mixed with a
+recognized staking deposit. Transaction hashing, ML-DSA-87 signing context,
+path validation, user approval and chunked signature export are unchanged.
+
+### Deployment configuration
+
+No staking deployment is trusted by default. Configure both build arguments:
+
+```sh
+make clean
+make -j4 DEBUG=0 STAKING_DEPOSIT_CHAIN_ID=<positive-decimal-uint256> \
+  STAKING_DEPOSIT_CONTRACT=<128-hex-digits-without-Q-or-0x>
+```
+
+The build rejects missing/invalid values, a zero contract and mixing a
+production deployment with the test profile. Confirm the deployment's address,
+network and contract version before configuring it. This profile targets the
+local Zond contract with RANDAO commitment; it does not describe legacy
+four-argument or Ethereum/BLS deposits. The app does not query blockchain code
+or establish deployment freshness. Rebuild when the pinned contract changes.
+
+For emulator tests, `DEBUG=1 STAKING_DEPOSIT_TEST_PROFILE=1` pins Chain ID 1
+and the 64-byte address `Q` followed by 64 bytes `42`. The device displays
+**TEST staking deposit**. This profile is not evidence of a production deployment.
+Without a matching profile, contract calls retain the ordinary blind-signing
+policy. Run `make clean` whenever changing build flags or deployment configuration.
+
+### Canonical QRVM ABI
+
+All ABI words and dynamic-length/offset words are **64 bytes**. Bytes32 is
+right-padded to a word, while numeric lengths/offsets are big endian. Offsets
+are relative to the start of the argument block after the selector.
+
+| Argument | Representation |
+| --- | --- |
+| Validator public key | Dynamic bytes, exactly 2592 bytes |
+| Withdrawal recipient | Dynamic bytes, exactly 64 bytes |
+| RANDAO commitment | Dynamic bytes, exactly 32 bytes |
+| Validator registration signature | Dynamic bytes, exactly 4627 bytes |
+| Deposit data root | Bytes32, followed by 32 zero padding bytes |
+
+The four dynamic offsets must be exactly `320`, `3008`, `3136`, `3264`.
+Lengths, field ordering and every padding byte are checked. Calldata must be
+exactly 8004 bytes; aliases, gaps, trailing data and nonzero padding are rejected.
+The full raw transaction is still hashed, including all calldata and RLP headers.
+A calldata observer feeds the staking decoder across arbitrary APDU/RLP chunk
+boundaries; ordinary decoders still retain their existing 256-byte prefix.
+
+### Amount and SSZ validation
+
+The native value must be an exact multiple of `10^9` planck (one shor), yielding
+a uint64 number of shor, at least `2000 * 10^9` shor (2000 QRL). This matches the
+contract minimum. The contract permits amounts above the validator's maximum
+effective balance; this funding review does not guarantee their staking yield
+or enforce the CLI's 40000-QRL effective-balance policy.
+
+The device reconstructs the SHA-256 SSZ root of the five-field fixed container:
+public-key vector, withdrawal-recipient vector, little-endian uint64 shor amount,
+RANDAO bytes32 and signature vector, padded to eight field roots. The public key
+uses 128 Merkle leaves and the signature 256; they are fixed vectors without
+list-length mix-in. A reusable eight-level frontier processes both vectors;
+neither full key nor signature is buffered. The SHA-256 implementation comes
+from the Ledger SDK. The supplied root must equal the reconstructed root, and
+the access list must be empty.
+
+The review shows the native amount, funding account, deposit contract,
+**Validator key root** (the SSZ public-key-vector root, not raw SHA-256 of the
+key), withdrawal address, RANDAO commitment, deposit data root, Chain ID and fees,
+with optional nonce/transaction hash. Nano uses shorter titles (`Validator root`,
+`RANDAO`, `Deposit root`, `Contract`) to preserve pagination labels. These public review strings reuse the
+buffers of mutually exclusive contract/token modes. The persistent decoder workspace is bounded by
+512 bytes and is compiled in only with staking support. The observer adds two
+pointers to parser state, and the staking review adds one pair slot. The existing linker
+stack-budget check remains enabled. Combined feature branches must remeasure
+RAM/stack before merging.
+
+A recognized deposit with invalid ABI, amount, root or access list returns
+`SW_STAKING_DEPOSIT_INVALID (6A8A)` and revokes the session, even with blind
+signing enabled. RLP errors still return `B005`. Unsupported selectors on the
+contract follow the ordinary blind-signing policy. Mixed signed metadata returns
+`B007`. Approval and rejection use the normal transaction review; no signature
+can be exported before approval or after a failed request.
+
+SSZ matching checks data consistency, **not** the validator registration
+signature, RANDAO onion ownership, consensus fork/domain, validator eligibility,
+execution simulation or activation. Validators and deposit tools must perform
+those checks separately. The Ledger signs only the funding transaction; it does
+not generate a validator key, operate a validator or submit a deposit to a node.
+
+### Emulator tests and demonstration
+
+```sh
+# Inside the development container, for Flex:
+export BOLOS_SDK="$FLEX_SDK"
+make clean
+make -j4 DEBUG=1 STAKING_DEPOSIT_TEST_PROFILE=1
+speculos --model flex --display headless --api-port 5003 --apdu-port 5004 build/flex/bin/app.elf
+
+# Host, with the emulator running and the browser touch frontend open:
+tests/venv/bin/python examples/staking_deposit.py --synthetic --url http://127.0.0.1:5003
+```
+
+`--synthetic` uses a fake validator key/signature strictly for UI testing and
+cannot register a validator. `--dry-run` builds without contacting Speculos.
+Alternatively, `--deposit-json path/to/deposit_data.json --index 0` reads an
+object or array exported by Zond's staking-deposit-cli, verifies its data root,
+and uses its fields unchanged. Set `--chain-id` and `--contract` to match the
+pinned deployment, and supply the intended nonce/fee settings. The demo always
+verifies the returned funding signature and never broadcasts a transaction.
+
+Build with `TOKEN_METADATA_TEST_KEY=1 CONTRACT_DESCRIPTOR_TEST_KEY=1
+STAKING_DEPOSIT_TEST_PROFILE=1 DEBUG=1` for the complete suite, then run:
+
+```sh
+tests/venv/bin/python -m pytest tests --device flex --token-metadata-test-key \
+  --contract-descriptor-test-key --staking-deposit-test-profile
+```
+
+The staking tests assume the default disabled build or the explicit test
+profile. Custom production deployments need matching vectors. Native unit
+tests use OpenSSL only as an independent SHA-256 adapter (`libssl-dev`); firmware
+has no OpenSSL dependency. The binary fixtures are derived from go-qrl's
+`core/vm/testdata/precompiles/depositroot.json`, vector
+`depositroot_40000_quanta` (expected root
+`9130e8f540b6a58a24da8b51e8661a2fbe937234490e7d59a6e2bbb99a3872e8`),
+re-encoded into the QRVM ABI and type-2 transaction format.

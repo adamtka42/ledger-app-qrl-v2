@@ -36,6 +36,22 @@
 #include "tx_stream.h"
 #include "dispatcher.h"  // DATA_FIRST, DATA_MORE, DATA_LAST
 
+#ifdef HAVE_STAKING_DEPOSIT
+static bool staking_hash(const uint8_t *data, size_t len, uint8_t out[32]) {
+    return cx_hash_sha256(data, len, out, 32) == 32;
+}
+
+static void observe_staking(void *context,
+                            uint32_t offset,
+                            uint32_t total,
+                            const uint8_t *data,
+                            size_t len) {
+    transaction_ctx_t *session = context;
+    if (staking_deposit_is_target(&session->tx_data))
+        staking_deposit_feed(&session->staking, offset, total, data, len);
+}
+#endif
+
 static int abort_sign_tx(uint16_t sw) {
     reset_request_context();
     return io_send_sw(sw);
@@ -56,6 +72,11 @@ static int start_sign_tx(buffer_t *cdata) {
 
     tx_stream_init(&G_context.tx_info.stream, &G_context.tx_info.tx_data);
     keccak256_init(&G_context.tx_info.hash_ctx);
+#ifdef HAVE_STAKING_DEPOSIT
+    staking_deposit_init(&G_context.tx_info.staking, staking_hash);
+    G_context.tx_info.stream.on_data = observe_staking;
+    G_context.tx_info.stream.observer_context = &G_context.tx_info;
+#endif
     // A rejected first command must never leave a session that can continue.
     G_context.req_type = CONFIRM_TRANSACTION;
     G_context.state = STATE_RECEIVING;
@@ -104,6 +125,18 @@ static int receive_tx_part(buffer_t *cdata, uint8_t p1) {
     G_context.state = STATE_PARSED;
 
     zond_tx_t *tx = &G_context.tx_info.tx_data;
+    bool staking = false;
+#ifdef HAVE_STAKING_DEPOSIT
+    if (staking_deposit_is_target(tx) && G_context.tx_info.staking.selected) {
+        if (G_context.tx_info.token_metadata.verified ||
+            G_context.tx_info.contract_descriptor.verified)
+            return abort_sign_tx(SW_BAD_STATE);
+        if (!staking_deposit_validate(&G_context.tx_info.staking, tx))
+            return abort_sign_tx(SW_STAKING_DEPOSIT_INVALID);
+        G_context.tx_info.staking_call = true;
+        staking = true;
+    }
+#endif
     bool token =
         token_call_prepare(tx, &G_context.tx_info.token_metadata, &G_context.tx_info.token_call);
     const contract_descriptor_t *descriptor = &G_context.tx_info.contract_descriptor;
@@ -111,8 +144,8 @@ static int receive_tx_part(buffer_t *cdata, uint8_t p1) {
     if (descriptor->verified && !G_context.tx_info.contract_call) {
         return abort_sign_tx(SW_CONTRACT_CALL_MISMATCH);
     }
-    bool blind =
-        (tx->has_data || tx->has_access_list) && !token && !G_context.tx_info.contract_call;
+    bool blind = (tx->has_data || tx->has_access_list) && !token &&
+                 !G_context.tx_info.contract_call && !staking;
     if (blind && !N_storage.enable_blind_signing) {
         return abort_sign_tx(SW_DENY);
     }

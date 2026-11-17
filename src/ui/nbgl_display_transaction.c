@@ -58,7 +58,12 @@ static char g_contract_labels[CONTRACT_CALL_MAX_FIELDS][CONTRACT_CALL_LABEL_MAX 
 // Maximum review fields: From/Owner, Amount/Spending limit, To/Spender or Operation, Token
 // contract, Chain ID, Gas limit, Priority fee / gas, Max fees, Nonce, Transaction hash.
 // Contract calls add Operation and up to three numbered arguments to native fields.
+#ifdef HAVE_STAKING_DEPOSIT
+// Native fields plus Operation, Validator key root, Withdraw to, RANDAO and Deposit data root.
+enum { MAX_REVIEW_PAIRS = 14 };
+#else
 enum { MAX_REVIEW_PAIRS = 10 + CONTRACT_CALL_MAX_FIELDS };
+#endif
 static nbgl_contentTagValue_t pairs[MAX_REVIEW_PAIRS];
 static nbgl_contentTagValueList_t pairList;
 
@@ -100,6 +105,25 @@ static void bytes_to_lower_hex(const uint8_t *bytes, size_t len, char *out) {
     }
     out[2 * len] = '\0';
 }
+
+#ifdef HAVE_STAKING_DEPOSIT
+// The deposit fields a staking review shows. They borrow the contract and token
+// buffers, which belong to mutually exclusive review modes.
+enum { STAKING_VALUE_KEY_ROOT, STAKING_VALUE_WITHDRAWAL, STAKING_VALUE_RANDAO };
+_Static_assert(CONTRACT_CALL_MAX_FIELDS > STAKING_VALUE_RANDAO,
+               "staking values do not fit the contract argument buffers");
+
+static uint16_t format_staking_values(const staking_deposit_t *deposit) {
+    bytes_to_lower_hex(deposit->pubkey_root, 32, g_contract_values[STAKING_VALUE_KEY_ROOT]);
+    if (!format_checksummed_address(deposit->withdrawal,
+                                    g_contract_values[STAKING_VALUE_WITHDRAWAL],
+                                    sizeof(g_contract_values[STAKING_VALUE_WITHDRAWAL])))
+        return SW_DISPLAY_ADDRESS_FAIL;
+    bytes_to_lower_hex(deposit->randao, 32, g_contract_values[STAKING_VALUE_RANDAO]);
+    bytes_to_lower_hex(deposit->expected_root, 32, g_token_contract);
+    return SW_OK;
+}
+#endif
 
 // The token amount, scaled by the decimals of its signed metadata. An unlimited
 // approval has no amount worth scaling.
@@ -216,6 +240,15 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     if (G_context.req_type != CONFIRM_TRANSACTION || G_context.state != STATE_PARSED) {
         return abort_display(SW_BAD_STATE);
     }
+#ifdef HAVE_STAKING_DEPOSIT
+    const bool is_staking = G_context.tx_info.staking_call;
+    const staking_deposit_t *deposit = &G_context.tx_info.staking;
+    if (is_staking && (is_blind_signed || !staking_deposit_is_target(tx) ||
+                       !staking_deposit_validate(deposit, tx)))
+        return abort_display(SW_BAD_STATE);
+#else
+    const bool is_staking = false;
+#endif
     const bool is_contract_creation = (tx->to_len == 0);
     const bool is_contract = G_context.tx_info.contract_call;
     const contract_descriptor_t *descriptor = &G_context.tx_info.contract_descriptor;
@@ -251,6 +284,15 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         review_title = "Review contract call";
 #endif
         confirmation_title = "Sign contract call";
+    }
+
+    if (is_staking) {
+#ifdef STAKING_DEPOSIT_TEST_PROFILE
+        review_title = "TEST staking deposit";
+#else
+        review_title = "Stake QRL";
+#endif
+        confirmation_title = "Sign staking deposit";
     }
 
     print_tx_utils(tx);
@@ -339,7 +381,12 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     if (is_contract_creation) {
         ADD_PAIR("Operation", "Create contract");
     } else {
-        ADD_PAIR(is_approval ? "Spender" : "To", g_to_address);
+#ifdef SCREEN_SIZE_WALLET
+        const char *deposit_label = "Deposit contract";
+#else
+        const char *deposit_label = "Contract";
+#endif
+        ADD_PAIR(is_staking ? deposit_label : is_approval ? "Spender" : "To", g_to_address);
     }
     if (is_token) {
 #ifdef SCREEN_SIZE_WALLET
@@ -357,6 +404,26 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
             ADD_PAIR(g_contract_labels[i], g_contract_values[i]);
         }
     }
+#ifdef HAVE_STAKING_DEPOSIT
+    if (is_staking) {
+        const uint16_t sw = format_staking_values(deposit);
+        if (sw != SW_OK) return abort_display(sw);
+        ADD_PAIR("Operation", "Stake QRL");
+#ifdef SCREEN_SIZE_WALLET
+        ADD_PAIR("Validator key root", g_contract_values[STAKING_VALUE_KEY_ROOT]);
+#else
+        ADD_PAIR("Validator root", g_contract_values[STAKING_VALUE_KEY_ROOT]);
+#endif
+        ADD_PAIR("Withdraw to", g_contract_values[STAKING_VALUE_WITHDRAWAL]);
+#ifdef SCREEN_SIZE_WALLET
+        ADD_PAIR("RANDAO commitment", g_contract_values[STAKING_VALUE_RANDAO]);
+        ADD_PAIR("Deposit data root", g_token_contract);
+#else
+        ADD_PAIR("RANDAO", g_contract_values[STAKING_VALUE_RANDAO]);
+        ADD_PAIR("Deposit root", g_token_contract);
+#endif
+    }
+#endif
     ADD_PAIR("Chain ID", g_chain_id);
     ADD_PAIR("Gas limit", g_gas_limit);
     ADD_PAIR("Priority fee / gas", g_gas_tip_cap);

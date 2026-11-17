@@ -212,6 +212,7 @@ static bool field_store(const tx_stream_t *s, zond_tx_t *tx, const uint8_t *src,
             memcpy(tx->descriptor + pos, src, n);
             break;
         case TX_F_DATA:
+            if (s->on_data != NULL) s->on_data(s->observer_context, pos, s->field_len, src, n);
             if (pos < sizeof(tx->data)) {
                 uint32_t retained = sizeof(tx->data) - pos;
                 if (retained > n) retained = n;

@@ -17,6 +17,9 @@
 #include "sign.h"
 #include "sw.h"
 #include "tx_format.h"
+#include "tx_stream.h"
+#include "staking_hash.h"
+#include <stdio.h>
 
 global_ctx_t G_context;
 const internal_storage_t N_storage_real = {0};
@@ -90,7 +93,46 @@ void nbgl_useCaseReview(int type,
     (void) subtitle;
     (void) finish;
     assert_int_equal(type, TYPE_TRANSACTION);
-    assert_int_equal(pairs->nbPairs, G_context.tx_info.contract_call ? 13 : 9);
+    assert_int_equal(pairs->nbPairs,
+                     G_context.tx_info.staking_call    ? 14
+                     : G_context.tx_info.contract_call ? 13
+                                                       : 9);
+    if (G_context.tx_info.staking_call) {
+        assert_string_equal(title, "Stake QRL");
+        assert_string_equal(finish, "Sign staking deposit");
+        assert_string_equal(pairs->pairs[1].value, "QRL 40000");
+#ifdef SCREEN_SIZE_WALLET
+        assert_string_equal(pairs->pairs[2].item, "Deposit contract");
+#else
+        assert_string_equal(pairs->pairs[2].item, "Contract");
+#endif
+        assert_string_equal(pairs->pairs[3].value, "Stake QRL");
+#ifdef SCREEN_SIZE_WALLET
+        assert_string_equal(pairs->pairs[4].item, "Validator key root");
+#else
+        assert_string_equal(pairs->pairs[4].item, "Validator root");
+#endif
+        assert_string_equal(pairs->pairs[5].item, "Withdraw to");
+        /* Fixed expectations from the independent go-qrl depositroot vector;
+         * do not derive them from the decoder buffers being reviewed. */
+        assert_string_equal(pairs->pairs[4].value,
+                            "f323c59c3d728d8f33462aa1fa3df4298e68ad9f05b470909b099da2e078304c");
+        assert_string_equal(pairs->pairs[5].value,
+                            "QAcA815d956C82Bca26916e21621d6d054C7C5748F622b1192577Beb208b7b1E4"
+                            "F64106cc801ED333EA7C4Eb1d074d498070c98B64cA6C9274C60b95649E0a3a6");
+        assert_string_equal(pairs->pairs[6].value,
+                            "893c4612b107746836b9c4419f8a899d1aaa9ff50d0653170014382c9e47e345");
+#ifdef SCREEN_SIZE_WALLET
+        assert_string_equal(pairs->pairs[6].item, "RANDAO commitment");
+        assert_string_equal(pairs->pairs[7].item, "Deposit data root");
+#else
+        assert_string_equal(pairs->pairs[6].item, "RANDAO");
+        assert_string_equal(pairs->pairs[7].item, "Deposit root");
+#endif
+        assert_string_equal(pairs->pairs[7].value,
+                            "9130e8f540b6a58a24da8b51e8661a2fbe937234490e7d59a6e2bbb99a3872e8");
+        assert_string_equal(pairs->pairs[13].item, "Transaction hash");
+    }
     if (G_context.tx_info.contract_call) {
         assert_string_equal(title, "Review contract call");
         assert_string_equal(finish, "Sign contract call");
@@ -391,6 +433,45 @@ static void test_contract_review_capacity_and_validation(void **state) {
     }
 }
 
+static void observe_deposit(void *context,
+                            uint32_t offset,
+                            uint32_t total,
+                            const uint8_t *data,
+                            size_t len) {
+    staking_deposit_feed(context, offset, total, data, len);
+}
+
+static void test_staking_review_capacity_and_guard(void **unused) {
+    (void) unused;
+    uint8_t preimage[8300];
+    FILE *file = fopen(STAKING_PREIMAGE, "rb");
+    assert_non_null(file);
+    size_t len = fread(preimage, 1, sizeof(preimage), file);
+    fclose(file);
+    for (unsigned corrupt = 0; corrupt < 2; corrupt++) {
+        start_session(NO_FAULT, 0);
+        transaction_ctx_t *session = &G_context.tx_info;
+        tx_stream_init(&session->stream, &session->tx_data);
+        staking_deposit_init(&session->staking, test_staking_hash);
+        session->stream.on_data = observe_deposit;
+        session->stream.observer_context = &session->staking;
+        assert_int_equal(tx_stream_feed(&session->stream, &session->tx_data, preimage, len),
+                         TX_STREAM_FINISHED);
+        session->staking_call = true;
+        if (corrupt) session->staking.expected_root[0] ^= 1;
+        ui_display_transaction_bs_choice(false, &session->tx_data);
+        if (corrupt) {
+            assert_discarded(SW_BAD_STATE);
+            assert_int_equal(menu_calls, 1);
+            assert_int_equal(review_calls, 0);
+        } else {
+            assert_int_equal(review_calls, 1);
+            review_callback(false);
+            assert_discarded(SW_DENY);
+        }
+    }
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_preparation_failure_returns_home),
@@ -398,6 +479,7 @@ int main(void) {
         cmocka_unit_test(test_review_status_matches_signature_result),
         cmocka_unit_test(test_rejection_status),
         cmocka_unit_test(test_contract_review_capacity_and_validation),
+        cmocka_unit_test(test_staking_review_capacity_and_guard),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

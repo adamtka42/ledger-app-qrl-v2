@@ -89,3 +89,11 @@ docker run --rm --privileged -e FUZZING_LANGUAGE=c -v "$(realpath .)/fuzzing/out
 ```console
 docker run --rm --privileged -e FUZZING_ENGINE=libfuzzer -e RUN_FUZZER_MODE=interactive -v "$(realpath .)/fuzzing/corpus:/tmp/fuzz_corpus" -v "$(realpath .)/fuzzing/out:/out" -ti gcr.io/oss-fuzz-base/base-runner run_fuzzer fuzz_tx_parser
 ```
+
+
+`fuzz_staking_deposit` exercises the streaming QRVM deposit decoder and SSZ
+validation with whole-input versus arbitrary chunk boundaries. Its native
+SHA-256 adapter links the low-level OpenSSL archive objects (`libssl-dev`);
+firmware uses the Ledger SDK. ClusterFuzzLite exports a known go-qrl deposit
+root seed with its 32-byte native amount followed by calldata. Build with the
+existing CMake/Clang instructions and run `fuzz_staking_deposit -max_len=8100`.

@@ -87,7 +87,17 @@ typedef enum {
     TX_STREAM_ERROR            /// malformed input, the state is sticky
 } tx_stream_status_e;
 
+/* Optional observer sees every calldata byte, including bytes beyond the prefix.
+ * Installed by trusted code after init; it does not replace RLP validation. */
+typedef void (*tx_data_observer_t)(void *context,
+                                   uint32_t offset,
+                                   uint32_t total,
+                                   const uint8_t *data,
+                                   size_t len);
+
 typedef struct {
+    tx_data_observer_t on_data;
+    void *observer_context;
     tx_field_e field;             /// field currently being received
     bool in_payload;              /// false: collecting the RLP header, true: consuming payload
     bool failed;                  /// set on the first error, never cleared

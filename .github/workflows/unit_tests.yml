@@ -28,6 +28,9 @@ jobs:
           ref: ceed1ec7200a4813913b48556bb64b0bae67dcd4
           path: sdk
 
+      - name: Install native SHA-256 test dependency
+        run: apt-get update && apt-get install --no-install-recommends -y libssl-dev
+
       - name: Build unit tests
         run: |
           cd unit-tests/

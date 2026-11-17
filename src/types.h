@@ -10,6 +10,9 @@
 #include "tx_types.h"
 #include "token_call.h"
 #include "contract_call.h"
+#ifdef HAVE_STAKING_DEPOSIT
+#include "staking_deposit.h"
+#endif
 #include "keccak256.h"  // keccak256_ctx
 
 /**
@@ -63,6 +66,10 @@ typedef struct {
     token_call_t token_call;
     contract_descriptor_t contract_descriptor;  /// verified and consumed within this session
     bool contract_call;                         /// complete transaction matched descriptor
+#ifdef HAVE_STAKING_DEPOSIT
+    staking_deposit_t staking;
+    bool staking_call;
+#endif
 } transaction_ctx_t;
 
 /**

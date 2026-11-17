@@ -8,6 +8,10 @@
 /**
  * Reset the parser state and the output structure before the first chunk.
  *
+ * Init also clears the optional calldata observer. A trusted caller may set
+ * on_data/observer_context before feeding; it receives field-relative offsets
+ * and every calldata byte without changing prefix retention or raw hashing.
+ *
  * @param[out] s   parser state
  * @param[out] tx  decoded transaction fields
  */

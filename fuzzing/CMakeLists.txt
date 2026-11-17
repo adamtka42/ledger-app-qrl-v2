@@ -67,3 +67,16 @@ add_executable(fuzz_contract_call fuzz_contract_call.c)
 target_compile_options(fuzz_contract_call PRIVATE ${FUZZ_COMPILE_FLAGS} -fno-sanitize-recover=undefined)
 target_link_options(fuzz_contract_call PRIVATE ${FUZZ_LINK_FLAGS})
 target_link_libraries(fuzz_contract_call PRIVATE contract_call)
+
+set(OPENSSL_USE_STATIC_LIBS TRUE)
+find_package(OpenSSL REQUIRED)
+add_library(staking_deposit ../src/staking_deposit.c)
+target_include_directories(staking_deposit PUBLIC ../src)
+target_compile_options(staking_deposit PRIVATE ${FUZZ_COMPILE_FLAGS} -fno-sanitize-recover=undefined)
+add_executable(fuzz_staking_deposit fuzz_staking_deposit.c)
+target_compile_options(fuzz_staking_deposit PRIVATE ${FUZZ_COMPILE_FLAGS} -fno-sanitize-recover=undefined)
+target_link_options(fuzz_staking_deposit PRIVATE ${FUZZ_LINK_FLAGS})
+# Only the low-level SHA-256 archive objects are needed by the native adapter.
+# Avoid pkg-config's optional EVP-provider dependencies (e.g. libzstd).
+target_include_directories(fuzz_staking_deposit PRIVATE ${OPENSSL_INCLUDE_DIR})
+target_link_libraries(fuzz_staking_deposit PRIVATE staking_deposit ${OPENSSL_CRYPTO_LIBRARY})
