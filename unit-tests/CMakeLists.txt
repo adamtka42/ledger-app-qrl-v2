@@ -152,3 +152,38 @@ add_executable(test_signed_metadata test_signed_metadata.c ../src/signed_metadat
 target_include_directories(test_signed_metadata BEFORE PRIVATE mocks/metadata)
 target_link_libraries(test_signed_metadata PRIVATE cmocka gcov)
 add_test(test_signed_metadata test_signed_metadata)
+
+find_package(OpenSSL REQUIRED)
+add_library(staking_deposit ../src/staking_deposit.c ../src/staking_profile.c)
+target_compile_definitions(staking_deposit PRIVATE STAKING_DEPOSIT_TEST_PROFILE)
+add_executable(test_staking_deposit test_staking_deposit.c)
+target_link_libraries(test_staking_deposit PRIVATE staking_deposit tx_stream cmocka gcov OpenSSL::Crypto)
+target_compile_definitions(test_staking_deposit PRIVATE STAKING_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/staking_deposit.bin" STAKING_PREIMAGE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/staking_preimage.bin")
+add_test(test_staking_deposit test_staking_deposit)
+
+foreach(review_target test_transaction_review test_transaction_review_nano)
+    target_compile_definitions(${review_target} PRIVATE HAVE_STAKING_DEPOSIT
+        STAKING_PREIMAGE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/staking_preimage.bin")
+    target_link_libraries(${review_target} PRIVATE staking_deposit tx_stream OpenSSL::Crypto)
+endforeach()
+
+add_test(NAME test_staking_profile
+         COMMAND ${TOKEN_METADATA_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/test_staking_profile.py)
+
+# Exercise the production matcher with a nonzero high chain byte, unlike chain 1
+# in STAKING_DEPOSIT_TEST_PROFILE. Generate the actual firmware initializer.
+string(REPEAT "42" 64 STAKING_TARGET_TEST_CONTRACT)
+execute_process(
+    COMMAND ${TOKEN_METADATA_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/staking_profile.py
+            257 ${STAKING_TARGET_TEST_CONTRACT}
+    OUTPUT_VARIABLE STAKING_TARGET_TEST_PROFILE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE STAKING_TARGET_TEST_RESULT)
+if(NOT STAKING_TARGET_TEST_RESULT EQUAL 0)
+    message(FATAL_ERROR "Cannot generate staking target test profile")
+endif()
+add_executable(test_staking_target test_staking_target.c ../src/staking_profile.c)
+target_compile_definitions(test_staking_target PRIVATE
+    STAKING_DEPOSIT_PROFILE_BYTES=${STAKING_TARGET_TEST_PROFILE})
+target_link_libraries(test_staking_target PRIVATE cmocka gcov)
+add_test(test_staking_target test_staking_target)

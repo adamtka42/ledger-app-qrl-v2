@@ -6,6 +6,7 @@ Be sure to have installed:
 
 - CMake >= 3.10
 - CMocka >= 1.1.5
+- OpenSSL development headers/libraries (`libssl-dev`) for staking tests; firmware uses the Ledger SDK.
 
 and for code coverage generation:
 
@@ -53,6 +54,10 @@ without an emulator or third-party Python packages.
 off-curve points, coordinate ranges, malformed encodings, and the test-key gate.
 It requires Python 3 and can also run with `python3 unit-tests/test_token_metadata_key.py`
 from the repository root.
+`test_staking_target` compiles the production target matcher for chain 257 and
+checks the complete network/address binding, including rejection of chain 1
+with the same low byte. The staking review tests check the exact displayed
+validator root, withdrawal address, and RANDAO value against a fixed go-qrl vector.
 Device tests in `tests/test_token_transfer_cmd.py` and `tests/test_token_approval_cmd.py` verify real
 metadata signatures and ML-DSA transaction signatures in Speculos. Positive
 device tests require `DEBUG=1 TOKEN_METADATA_TEST_KEY=1` and should run with

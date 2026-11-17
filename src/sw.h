@@ -5,6 +5,10 @@
  */
 #define SW_OK 0x9000
 /**
+ * Invalid recognized staking deposit: ABI, amount, SSZ root or access list.
+ */
+#define SW_STAKING_DEPOSIT_INVALID 0x6A8A
+/**
  * Invalid contract descriptor encoding or unsupported field definition.
  */
 #define SW_CONTRACT_DESCRIPTOR_INVALID 0x6A80

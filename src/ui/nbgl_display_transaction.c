@@ -55,7 +55,12 @@ static char g_contract_labels[CONTRACT_CALL_MAX_FIELDS][CONTRACT_CALL_LABEL_MAX 
 // Maximum review fields: From/Owner, Amount/Spending limit, To/Spender or Operation, Token
 // contract, Chain ID, Gas limit, Priority fee / gas, Max fees, Nonce, Transaction hash.
 // Contract calls add Operation and up to three numbered arguments to native fields.
+#ifdef HAVE_STAKING_DEPOSIT
+// Native fields plus Operation, Validator key root, Withdraw to, RANDAO and Deposit data root.
+enum { MAX_REVIEW_PAIRS = 14 };
+#else
 enum { MAX_REVIEW_PAIRS = 10 + CONTRACT_CALL_MAX_FIELDS };
+#endif
 static nbgl_contentTagValue_t pairs[MAX_REVIEW_PAIRS];
 static nbgl_contentTagValueList_t pairList;
 
@@ -152,6 +157,15 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     if (G_context.req_type != CONFIRM_TRANSACTION || G_context.state != STATE_PARSED) {
         return abort_display(SW_BAD_STATE);
     }
+#ifdef HAVE_STAKING_DEPOSIT
+    const bool is_staking = G_context.tx_info.staking_call;
+    const staking_deposit_t *deposit = &G_context.tx_info.staking;
+    if (is_staking && (is_blind_signed || !staking_deposit_is_target(tx) ||
+                       !staking_deposit_validate(deposit, tx)))
+        return abort_display(SW_BAD_STATE);
+#else
+    const bool is_staking = false;
+#endif
     const bool is_contract_creation = (tx->to_len == 0);
     const bool is_contract = G_context.tx_info.contract_call;
     const contract_descriptor_t *descriptor = &G_context.tx_info.contract_descriptor;
@@ -193,6 +207,15 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         review_title = "Review contract call";
 #endif
         confirmation_title = "Sign contract call";
+    }
+
+    if (is_staking) {
+#ifdef STAKING_DEPOSIT_TEST_PROFILE
+        review_title = "TEST staking deposit";
+#else
+        review_title = "Stake QRL";
+#endif
+        confirmation_title = "Sign staking deposit";
     }
 
     print_tx_utils(tx);
@@ -287,7 +310,11 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     if (is_contract_creation) {
         ADD_PAIR("Operation", "Create contract");
     } else {
-        ADD_PAIR(is_approval ? "Spender" : "To", g_to_address);
+#ifdef SCREEN_SIZE_WALLET
+        ADD_PAIR(is_staking ? "Deposit contract" : is_approval ? "Spender" : "To", g_to_address);
+#else
+        ADD_PAIR(is_staking ? "Contract" : is_approval ? "Spender" : "To", g_to_address);
+#endif
     }
     if (is_token) {
         ADD_PAIR("Token contract", g_token_contract);
@@ -332,6 +359,32 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
             ADD_PAIR(g_contract_labels[i], value);
         }
     }
+#ifdef HAVE_STAKING_DEPOSIT
+    if (is_staking) {
+        // These buffers belong to mutually exclusive contract/token review modes.
+        bytes_to_lower_hex(deposit->pubkey_root, 32, g_contract_values[0]);
+        if (!format_checksummed_address(deposit->withdrawal,
+                                        g_contract_values[1],
+                                        sizeof(g_contract_values[1])))
+            return abort_display(SW_DISPLAY_ADDRESS_FAIL);
+        bytes_to_lower_hex(deposit->randao, 32, g_contract_values[2]);
+        bytes_to_lower_hex(deposit->expected_root, 32, g_token_contract);
+        ADD_PAIR("Operation", "Stake QRL");
+#ifdef SCREEN_SIZE_WALLET
+        ADD_PAIR("Validator key root", g_contract_values[0]);
+#else
+        ADD_PAIR("Validator root", g_contract_values[0]);
+#endif
+        ADD_PAIR("Withdraw to", g_contract_values[1]);
+#ifdef SCREEN_SIZE_WALLET
+        ADD_PAIR("RANDAO commitment", g_contract_values[2]);
+        ADD_PAIR("Deposit data root", g_token_contract);
+#else
+        ADD_PAIR("RANDAO", g_contract_values[2]);
+        ADD_PAIR("Deposit root", g_token_contract);
+#endif
+    }
+#endif
     ADD_PAIR("Chain ID", g_chain_id);
     ADD_PAIR("Gas limit", g_gas_limit);
     ADD_PAIR("Priority fee / gas", g_gas_tip_cap);

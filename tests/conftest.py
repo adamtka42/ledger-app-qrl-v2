@@ -22,6 +22,8 @@ pytest_plugins = ("ragger.conftest.base_conftest", )
 
 
 def pytest_addoption(parser):
+    parser.addoption("--staking-deposit-test-profile", action="store_true",
+                     help="Require DEBUG=1 STAKING_DEPOSIT_TEST_PROFILE=1.")
     parser.addoption(
         "--contract-descriptor-test-key", action="store_true",
         help="Require contract descriptor test issuer (DEBUG=1 CONTRACT_DESCRIPTOR_TEST_KEY=1).",
@@ -57,3 +59,9 @@ def contract_issuer(backend, request):
                 pytest.fail("No contract issuer configured; expected DEBUG=1 CONTRACT_DESCRIPTOR_TEST_KEY=1")
             pytest.skip("Requires DEBUG=1 CONTRACT_DESCRIPTOR_TEST_KEY=1")
         raise
+
+
+@pytest.fixture
+def staking_profile(request):
+    if not request.config.getoption("--staking-deposit-test-profile"):
+        pytest.skip("Requires DEBUG=1 STAKING_DEPOSIT_TEST_PROFILE=1")

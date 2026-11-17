@@ -170,6 +170,36 @@ DEFINES += CONTRACT_DESCRIPTOR_TEST_KEY
 endif
 
 ########################################
+#      Pinned staking deployment       #
+########################################
+# No deployment is trusted by default. Values must be verified for the target network.
+# STAKING_DEPOSIT_CHAIN_ID=<decimal> STAKING_DEPOSIT_CONTRACT=<128 hex digits>
+ifneq ($(strip $(STAKING_DEPOSIT_CHAIN_ID)$(STAKING_DEPOSIT_CONTRACT)),)
+ifeq ($(STAKING_DEPOSIT_TEST_PROFILE),1)
+$(error Select a production staking deployment or STAKING_DEPOSIT_TEST_PROFILE)
+endif
+staking_chain_rest := $(STAKING_DEPOSIT_CHAIN_ID)
+$(foreach c,0 1 2 3 4 5 6 7 8 9,$(eval staking_chain_rest := $$(subst $(c),,$$(staking_chain_rest))))
+staking_contract := $(subst A,a,$(subst B,b,$(subst C,c,$(subst D,d,$(subst E,e,$(subst F,f,$(STAKING_DEPOSIT_CONTRACT)))))))
+staking_contract_rest := $(staking_contract)
+$(foreach c,0 1 2 3 4 5 6 7 8 9 a b c d e f,$(eval staking_contract_rest := $$(subst $(c),,$$(staking_contract_rest))))
+ifneq ($(staking_chain_rest)$(staking_contract_rest),)
+$(error Staking Chain ID must contain decimal digits and contract only hex digits)
+endif
+staking_profile_bytes := $(shell python3 tools/staking_profile.py '$(STAKING_DEPOSIT_CHAIN_ID)' '$(staking_contract)')
+ifeq ($(staking_profile_bytes),)
+$(error Invalid staking deployment configuration)
+endif
+DEFINES += HAVE_STAKING_DEPOSIT STAKING_DEPOSIT_PROFILE_BYTES=$(staking_profile_bytes)
+endif
+ifeq ($(STAKING_DEPOSIT_TEST_PROFILE),1)
+ifneq ($(DEBUG),1)
+$(error STAKING_DEPOSIT_TEST_PROFILE=1 requires DEBUG=1)
+endif
+DEFINES += HAVE_STAKING_DEPOSIT STAKING_DEPOSIT_TEST_PROFILE
+endif
+
+########################################
 #     Application custom permissions   #
 ########################################
 # See SDK `include/appflags.h` for the purpose of each permission
