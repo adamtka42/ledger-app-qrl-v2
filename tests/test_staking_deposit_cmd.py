@@ -97,8 +97,8 @@ def test_staking_wrong_target_requires_blind(backend, mutation):
     assert exc.value.status == Errors.SW_DENY
 
 
-def test_staking_default_build_requires_blind(backend, request):
-    if request.config.getoption("--staking-deposit-test-profile"):
+def test_staking_default_build_requires_blind(backend, staking_test_profile_present):
+    if staking_test_profile_present:
         pytest.skip("This assertion targets a build without a pinned staking deployment")
     with pytest.raises(ExceptionRAPDU) as exc:
         with BoilerplateCommandSender(backend).sign_tx(PATH, deposit_tx()):

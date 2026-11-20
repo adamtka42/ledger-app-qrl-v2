@@ -167,6 +167,24 @@ foreach(review_target test_transaction_review test_transaction_review_nano)
     target_link_libraries(${review_target} PRIVATE staking_deposit tx_stream OpenSSL::Crypto)
 endforeach()
 
+# The default firmware has no staking support: keep its review screen covered too.
+foreach(review_variant "" "_nano")
+    set(review_target test_transaction_review${review_variant}_default)
+    add_executable(${review_target}
+        test_transaction_review.c
+        ../src/ui/nbgl_display_transaction.c
+        ../src/ui/action/validate.c
+        ../src/helper/request_context.c)
+    target_include_directories(${review_target} BEFORE PRIVATE mocks ../src/helper ../src/ui/action)
+    set_property(TARGET ${review_target} APPEND_STRING PROPERTY LINK_FLAGS
+        " -Wl,--wrap=format_checksummed_address,--wrap=format_qrl_amount,--wrap=multiply_uint8_arrays,--wrap=uint8_array_to_decimal")
+    target_link_libraries(${review_target} PRIVATE
+        tx_format address_format hashes token_call contract_call tx_stream cmocka gcov)
+    add_test(${review_target} ${review_target})
+endforeach()
+target_compile_definitions(test_transaction_review_default PRIVATE TARGET_FLEX SCREEN_SIZE_WALLET)
+target_compile_definitions(test_transaction_review_nano_default PRIVATE TARGET_NANOS2)
+
 add_test(NAME test_staking_profile
          COMMAND ${TOKEN_METADATA_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/test_staking_profile.py)
 
