@@ -55,12 +55,17 @@ static char g_contract_labels[CONTRACT_CALL_MAX_FIELDS][CONTRACT_CALL_LABEL_MAX 
 // Maximum review fields: From/Owner, Amount/Spending limit, To/Spender or Operation, Token
 // contract, Chain ID, Gas limit, Priority fee / gas, Max fees, Nonce, Transaction hash.
 // Contract calls add Operation and up to three numbered arguments to native fields.
+// Staking adds Operation, Validator key root, Withdraw to, RANDAO and Deposit data root.
+enum {
+    CONTRACT_REVIEW_PAIRS = 10 + CONTRACT_CALL_MAX_FIELDS,
 #ifdef HAVE_STAKING_DEPOSIT
-// Native fields plus Operation, Validator key root, Withdraw to, RANDAO and Deposit data root.
-enum { MAX_REVIEW_PAIRS = 14 };
+    STAKING_REVIEW_PAIRS = 14,
+    MAX_REVIEW_PAIRS =
+        STAKING_REVIEW_PAIRS > CONTRACT_REVIEW_PAIRS ? STAKING_REVIEW_PAIRS : CONTRACT_REVIEW_PAIRS
 #else
-enum { MAX_REVIEW_PAIRS = 10 + CONTRACT_CALL_MAX_FIELDS };
+    MAX_REVIEW_PAIRS = CONTRACT_REVIEW_PAIRS
 #endif
+};
 static nbgl_contentTagValue_t pairs[MAX_REVIEW_PAIRS];
 static nbgl_contentTagValueList_t pairList;
 

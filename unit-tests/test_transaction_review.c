@@ -18,8 +18,15 @@
 #include "sw.h"
 #include "tx_format.h"
 #include "tx_stream.h"
-#include "staking_hash.h"
 #include <stdio.h>
+
+/* The same file also builds without staking, covering the default firmware. */
+#ifdef HAVE_STAKING_DEPOSIT
+#include "staking_hash.h"
+#define STAKING_CALL (G_context.tx_info.staking_call)
+#else
+#define STAKING_CALL false
+#endif
 
 global_ctx_t G_context;
 const internal_storage_t N_storage_real = {0};
@@ -93,11 +100,8 @@ void nbgl_useCaseReview(int type,
     (void) subtitle;
     (void) finish;
     assert_int_equal(type, TYPE_TRANSACTION);
-    assert_int_equal(pairs->nbPairs,
-                     G_context.tx_info.staking_call    ? 14
-                     : G_context.tx_info.contract_call ? 13
-                                                       : 9);
-    if (G_context.tx_info.staking_call) {
+    assert_int_equal(pairs->nbPairs, STAKING_CALL ? 14 : G_context.tx_info.contract_call ? 13 : 9);
+    if (STAKING_CALL) {
         assert_string_equal(title, "Stake QRL");
         assert_string_equal(finish, "Sign staking deposit");
         assert_string_equal(pairs->pairs[1].value, "QRL 40000");
@@ -433,6 +437,7 @@ static void test_contract_review_capacity_and_validation(void **state) {
     }
 }
 
+#ifdef HAVE_STAKING_DEPOSIT
 static void observe_deposit(void *context,
                             uint32_t offset,
                             uint32_t total,
@@ -471,6 +476,7 @@ static void test_staking_review_capacity_and_guard(void **unused) {
         }
     }
 }
+#endif
 
 int main(void) {
     const struct CMUnitTest tests[] = {
@@ -479,7 +485,9 @@ int main(void) {
         cmocka_unit_test(test_review_status_matches_signature_result),
         cmocka_unit_test(test_rejection_status),
         cmocka_unit_test(test_contract_review_capacity_and_validation),
+#ifdef HAVE_STAKING_DEPOSIT
         cmocka_unit_test(test_staking_review_capacity_and_guard),
+#endif
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
