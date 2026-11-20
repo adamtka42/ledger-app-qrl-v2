@@ -47,6 +47,12 @@ address and is displayed under `To`. Non-empty `data` (including contract
 initialization bytecode) or a non-empty access list still requires blind signing
 to be enabled and the corresponding warning to be acknowledged.
 
+A `chain_id` listed in `src/networks.def` is reviewed as
+`Network: <name> (<chain ID>)`, for example `Network: Mainnet (1)`; any other
+value is reviewed as a bare `Chain ID`. The names are compiled into the app and
+cannot be supplied by the host. To add or rename a network, edit that list and
+rebuild.
+
 The full on-chain transaction appends `signature` (4,627 bytes) and
 `public_key` (2,592 bytes) after `extra_params`; the device never receives or
 parses that signed envelope; assembling it is the host's job.

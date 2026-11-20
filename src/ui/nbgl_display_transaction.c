@@ -36,12 +36,16 @@
 #include "validate.h"
 #include "menu.h"
 #include "address.h"
+#include "network.h"
 
 static char g_from_address[1 + ADDRESS_SIZE * 2 + 1];
 static char g_amount[TX_FORMAT_MAX_AMOUNT_LEN + 5];
 static char g_to_address[1 + ADDRESS_SIZE * 2 + 1];
 static char g_max_fees[TX_FORMAT_MAX_AMOUNT_LEN + 5];
+// Either the bare decimal chain ID or "<network name> (<chain ID>)".
 static char g_chain_id[TX_FORMAT_MAX_DECIMAL_DIGITS + 1];
+_Static_assert(sizeof(g_chain_id) >= NETWORK_NAME_MAX_LEN + sizeof(" (18446744073709551615)"),
+               "network label does not fit");
 static char g_nonce[21];
 static char g_gas_limit[21];
 static char g_gas_tip_cap[TX_FORMAT_MAX_AMOUNT_LEN + 5];
@@ -188,6 +192,18 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         return abort_display(SW_DISPLAY_AMOUNT_FAIL);
     snprintf(g_gas_tip_cap, sizeof(g_gas_tip_cap), "QRL %s", amount);
 
+    // A listed network is shown by name, keeping the number it was matched on.
+    const char *network = network_name(tx->chain_id, tx->chain_id_len);
+    if (network != NULL) {
+        const size_t name_len = strlen(network), digits_len = strlen(g_chain_id);
+        if (name_len + digits_len + sizeof(" ()") > sizeof(g_chain_id))
+            return abort_display(SW_DISPLAY_AMOUNT_FAIL);
+        memmove(g_chain_id + name_len + 2, g_chain_id, digits_len);
+        memcpy(g_chain_id, network, name_len);
+        memcpy(g_chain_id + name_len, " (", 2);
+        memcpy(g_chain_id + name_len + 2 + digits_len, ")", 2);
+    }
+
     size_t count = 0;
 #define ADD_PAIR(label, text)          \
     do {                               \
@@ -201,7 +217,7 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     } else {
         ADD_PAIR("To", g_to_address);
     }
-    ADD_PAIR("Chain ID", g_chain_id);
+    ADD_PAIR(network != NULL ? "Network" : "Chain ID", g_chain_id);
     ADD_PAIR("Gas limit", g_gas_limit);
     ADD_PAIR("Priority fee / gas", g_gas_tip_cap);
     ADD_PAIR("Max fees", g_max_fees);
