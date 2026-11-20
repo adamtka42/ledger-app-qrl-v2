@@ -66,6 +66,12 @@ add_library(tx_stream ../src/tx_stream.c)
 target_link_libraries(test_tx_stream PUBLIC tx_stream cmocka gcov)
 add_test(test_tx_stream test_tx_stream)
 
+# network names come from the compiled-in list in src/networks.def
+add_executable(test_network test_network.c)
+add_library(network ../src/network.c)
+target_link_libraries(test_network PUBLIC network cmocka gcov)
+add_test(test_network test_network)
+
 add_executable(test_validate_transaction
     test_validate_transaction.c
     ../src/ui/action/validate.c
@@ -83,7 +89,7 @@ target_include_directories(test_transaction_review BEFORE PRIVATE mocks ../src/h
 target_compile_definitions(test_transaction_review PRIVATE TARGET_FLEX SCREEN_SIZE_WALLET)
 set_property(TARGET test_transaction_review APPEND_STRING PROPERTY LINK_FLAGS
     " -Wl,--wrap=format_checksummed_address,--wrap=format_qrl_amount,--wrap=multiply_uint8_arrays,--wrap=uint8_array_to_decimal")
-target_link_libraries(test_transaction_review PRIVATE tx_format address_format hashes cmocka gcov)
+target_link_libraries(test_transaction_review PRIVATE tx_format address_format hashes network cmocka gcov)
 add_test(test_transaction_review test_transaction_review)
 
 # Exercise real crypto code with mocked Ledger syscalls and observed erasure.

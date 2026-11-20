@@ -163,9 +163,10 @@ def _rlp_bytes(b: bytes) -> bytes:
     return _rlp_len(0x80, len(b)) + b
 
 
-def build_preimage(data: bytes, access_list: bytes = b"\xc0", to: bytes = _TO) -> bytes:
+def build_preimage(data: bytes, access_list: bytes = b"\xc0", to: bytes = _TO,
+                   chain_id: bytes = _CHAIN_ID) -> bytes:
     """Build the 11-field preimage; access_list is an already RLP-encoded list."""
-    payload = b"".join(_rlp_bytes(f) for f in (_CHAIN_ID, _NONCE, _GAS_TIP_CAP, _GAS_FEE_CAP, _GAS, to, _VALUE, data))
+    payload = b"".join(_rlp_bytes(f) for f in (chain_id, _NONCE, _GAS_TIP_CAP, _GAS_FEE_CAP, _GAS, to, _VALUE, data))
     payload += access_list + _rlp_bytes(_DESCRIPTOR) + b"\x80"
     return b"\x02" + _rlp_len(0xc0, len(payload)) + payload
 
@@ -218,6 +219,31 @@ def test_sign_tx_recipient(backend: BackendInterface,
             scenario_navigator.review_approve_with_warning(test_name=review_name)
         else:
             scenario_navigator.review_approve(test_name=review_name)
+
+    signature = get_signature_chunks(backend, client.get_async_response().data)
+    assert len(signature) == SIG_LEN
+    sighash = keccak.new(digest_bits=256, data=transaction).digest()
+    assert ML_DSA_87.verify(public_key, sighash, signature, ctx=SIGNING_CONTEXT)
+
+
+@pytest.mark.parametrize("chain_id", [
+    pytest.param(1337, id="testnet"),
+    pytest.param(3151908, id="unlisted"),
+])
+def test_sign_tx_network(backend: BackendInterface,
+                         request: pytest.FixtureRequest,
+                         scenario_navigator: NavigateWithScenario,
+                         chain_id: int) -> None:
+    """A listed chain ID is reviewed by network name, any other as a bare Chain ID."""
+    client = BoilerplateCommandSender(backend)
+    path = "m/44'/238'/0'/0/0"
+    client.get_public_key(path=path)
+    public_key = get_public_key_chunks(backend)
+    transaction = build_preimage(b"", chain_id=chain_id.to_bytes((chain_id.bit_length() + 7) // 8, "big"))
+
+    with client.sign_tx(path=path, transaction=transaction):
+        scenario_navigator.review_approve(
+            test_name=f"{request.node.originalname}_{request.node.callspec.id}")
 
     signature = get_signature_chunks(backend, client.get_async_response().data)
     assert len(signature) == SIG_LEN

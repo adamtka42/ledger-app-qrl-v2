@@ -77,6 +77,9 @@ void nbgl_useCaseSpinner(const char *text) {
     spinner = true;
 }
 
+static const char *expected_chain_label = "Network";
+static const char *expected_chain_value = "Mainnet (1)";
+
 void nbgl_useCaseReview(int type,
                         const nbgl_contentTagValueList_t *pairs,
                         const void *icon,
@@ -91,6 +94,8 @@ void nbgl_useCaseReview(int type,
     assert_int_equal(type, TYPE_TRANSACTION);
     assert_int_equal(pairs->nbPairs, 9);
     assert_non_null(pairs->pairs);
+    assert_string_equal(pairs->pairs[3].item, expected_chain_label);
+    assert_string_equal(pairs->pairs[3].value, expected_chain_value);
     spinner = false;
     review_callback = choice;
     review_calls++;
@@ -325,12 +330,27 @@ static void test_rejection_status(void **state) {
     }
 }
 
+static void test_unlisted_chain_shows_bare_chain_id(void **state) {
+    (void) state;
+    start_session(NO_FAULT, 0);
+    G_context.tx_info.tx_data.chain_id[0] = 2;
+    expected_chain_label = "Chain ID";
+    expected_chain_value = "2";
+    ui_display_transaction_bs_choice(false, &G_context.tx_info.tx_data);
+    expected_chain_label = "Network";
+    expected_chain_value = "Mainnet (1)";
+    assert_int_equal(review_calls, 1);
+    review_callback(false);
+    assert_discarded(SW_DENY);
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_preparation_failure_returns_home),
         cmocka_unit_test(test_invalid_review_state_returns_home),
         cmocka_unit_test(test_review_status_matches_signature_result),
         cmocka_unit_test(test_rejection_status),
+        cmocka_unit_test(test_unlisted_chain_shows_bare_chain_id),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
