@@ -58,7 +58,7 @@ being blind-signed, provided the host first identifies the collection with
 metadata signed by the token metadata issuer the firmware was built with.
 
 After the first `SIGN_TX` command (the derivation path) and before any
-transaction byte, the host sends `PROVIDE_NFT_METADATA` (`INS 0x0C`, `P1 = P2 = 0`):
+transaction byte, the host sends `PROVIDE_NFT_METADATA` (`INS 0x0D`, `P1 = P2 = 0`):
 
 ```text
 0x01 || chain_id (32 bytes, big-endian) || contract (64 bytes)

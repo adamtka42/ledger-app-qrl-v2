@@ -24,7 +24,7 @@ typedef enum {
     VERIFY_MSG = 0x07,      /// verify message with BIP32 path
     PROVIDE_TOKEN_METADATA = 0x0A,
     PROVIDE_CONTRACT_DESCRIPTOR = 0x0B,  /// authenticated static contract call description
-    PROVIDE_NFT_METADATA = 0x0C          /// authenticated NFT collection name
+    PROVIDE_NFT_METADATA = 0x0D          /// authenticated NFT collection name
 } command_e;
 /**
  * Enumeration with parsing state.

@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Token transfers (`transfer(address,uint256)`) are clear-signed with the amount, symbol and recipient when the host provides issuer-signed token metadata through the new `PROVIDE_TOKEN_METADATA` command (`INS 0x0A`). No metadata issuer is configured by default; one is set at build time with `TOKEN_METADATA_PUBLIC_KEY`; see `APP_SPECIFICATION.md`
 - Token spending approvals (`approve(address,uint256)`) are clear-signed with the spending limit and the spender, using the same issuer-signed token metadata. A zero limit is reviewed as a revocation and the maximum limit as `Unlimited` with an extra confirmation; see `APP_SPECIFICATION.md`
 - Contract calls with one to three static arguments (address, uint256 or bool) are clear-signed with an operation name and argument labels when the host provides an issuer-signed descriptor through the new `PROVIDE_CONTRACT_DESCRIPTOR` command (`INS 0x0B`). No descriptor issuer is configured by default; one is set at build time with `CONTRACT_DESCRIPTOR_PUBLIC_KEY`; see `APP_SPECIFICATION.md`
-- NFT transfers and approvals are clear-signed with the collection name when the host provides issuer-signed collection metadata through the new `PROVIDE_NFT_METADATA` command (`INS 0x0C`); see `doc/TRANSACTION.md`
+- NFT transfers and approvals are clear-signed with the collection name when the host provides issuer-signed collection metadata through the new `PROVIDE_NFT_METADATA` command (`INS 0x0D`); see `doc/TRANSACTION.md`
 
 ### Changed
 
