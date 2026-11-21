@@ -14,6 +14,8 @@
 
 #define ADDRESS_LENGTH 64
 #define MAX_FIELD_SIZE 32
+/** Maximum calldata prefix retained for operation decoders, independent of the ABI. */
+#define TX_CALLDATA_MAX_LEN 256u
 
 /**
  * Decoded fields of a QRL v2.0 type-2 transaction (sighash preimage).
@@ -42,6 +44,12 @@ typedef struct {
 
     bool has_data;
     bool has_access_list;
+
+    uint32_t data_len;  /// full calldata length, including bytes beyond the retained prefix
+    /* Retain min(data_len, sizeof(data)) bytes. Decoders must check data_len
+     * before accessing arguments. The caller hashes every byte, including the
+     * remainder of calldata larger than this buffer. */
+    uint8_t data[TX_CALLDATA_MAX_LEN];
 
     uint8_t descriptor[3];
     uint8_t descriptor_len;

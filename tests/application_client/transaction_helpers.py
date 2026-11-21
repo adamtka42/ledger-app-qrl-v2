@@ -1,4 +1,4 @@
-"""Shared signing constants, APDU chunk collection and RLP primitives."""
+"""Shared signing constants and APDU chunk collection."""
 from ragger.backend.interface import BackendInterface
 from .boilerplate_command_sender import CLA, InsType
 
@@ -24,16 +24,3 @@ def get_signature_chunks(backend: BackendInterface, first_chunk: bytes, *, ins: 
         r = backend.exchange(cla=CLA, ins=ins, p1=2, p2=p2)
         sig += r.data
     return bytes(sig)[:SIG_LEN]
-
-
-def _rlp_len(base: int, n: int) -> bytes:
-    if n < 56:
-        return bytes([base + n])
-    length = n.to_bytes((n.bit_length() + 7) // 8, "big")
-    return bytes([base + 55 + len(length)]) + length
-
-
-def _rlp_bytes(b: bytes) -> bytes:
-    if len(b) == 1 and b[0] < 0x80:
-        return b
-    return _rlp_len(0x80, len(b)) + b

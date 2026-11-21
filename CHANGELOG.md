@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Personal messages of up to 1024 bytes of printable ASCII are signed in the QRL signed-message format through the new `SIGN_PERSONAL_MESSAGE` command (`INS 0x08`), after the account, the byte count and the complete message are reviewed on the device; see `APP_SPECIFICATION.md`
 - QRL Typed Structured Data v1 is signed through the new `SIGN_TYPED_DATA` command (`INS 0x0C`). The device validates the type definitions and values, computes the hash itself and shows every field for review; see `APP_SPECIFICATION.md`
+- Token transfers (`transfer(address,uint256)`) are clear-signed with the amount, symbol and recipient when the host provides issuer-signed token metadata through the new `PROVIDE_TOKEN_METADATA` command (`INS 0x0A`). No metadata issuer is configured by default; one is set at build time with `TOKEN_METADATA_PUBLIC_KEY`; see `APP_SPECIFICATION.md`
+- Token spending approvals (`approve(address,uint256)`) are clear-signed with the spending limit and the spender, using the same issuer-signed token metadata. A zero limit is reviewed as a revocation and the maximum limit as `Unlimited` with an extra confirmation; see `APP_SPECIFICATION.md`
 
 ### Changed
 

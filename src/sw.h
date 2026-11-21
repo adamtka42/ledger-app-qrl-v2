@@ -13,6 +13,18 @@
  */
 #define SW_TYPED_DATA_INVALID SW_MESSAGE_INVALID /* the same status on purpose */
 /**
+ * Status word for invalid token metadata format or field values.
+ */
+#define SW_TOKEN_METADATA_INVALID 0x6A80
+/**
+ * Status word for failed token metadata authentication.
+ */
+#define SW_TOKEN_METADATA_UNTRUSTED 0x6982
+/**
+ * Status word for no configured token metadata issuer.
+ */
+#define SW_TOKEN_METADATA_NO_ISSUER 0x6A88
+/**
  * Status word for denied by user.
  */
 #define SW_DENY 0x6985

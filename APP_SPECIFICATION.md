@@ -370,6 +370,132 @@ custom definitions/values, `--print-example` to print JSON, or `--dry-run` to
 calculate the payload/hash without sending. `--output /tmp/typed.json` saves
 public signature verification data. The script verifies the signature locally.
 
+### PROVIDE TOKEN METADATA
+
+Accepts one authenticated token descriptor for the current transaction session.
+It must be sent **after** `SIGN_TX/DATA_FIRST` and **before** any transaction bytes:
+
+1. `SIGN_TX`, P1=`00`, P2=`00`: BIP32 path.
+2. `PROVIDE_TOKEN_METADATA`, CLA=`E0`, INS=`0A`, P1=`00`, P2=`00`: payload below.
+3. Existing `SIGN_TX/DATA_MORE` and `SIGN_TX/DATA_LAST`: unchanged transaction bytes.
+
+| Payload field | Bytes | Encoding |
+| --- | --- | --- |
+| Version | 1 | `01` |
+| Chain ID | 32 | Unsigned big-endian, left-padded with zeros; nonzero |
+| Token contract | 64 | Raw QRL address bytes, without textual `Q`; nonzero |
+| Decimals | 1 | `0` through `77` |
+| Symbol length | 1 | `1` through `12` |
+| Symbol | variable | ASCII letters, digits, `.`, `_`, `-`; no NUL/whitespace; never `QRL` in any letter case |
+| Signature | 8–72 | DER ECDSA P-256 signature |
+
+Issuers must attest only fungible SQRCTF1-compatible contracts on the specified
+network. This payload has no token-standard discriminator: ERC-721 uses the same
+`approve(address,uint256)` selector (`095ea7b3`), but the integer is a token ID,
+not a spending limit. The device cannot distinguish these semantics from
+calldata alone; issuers must not sign these descriptors for NFT contracts.
+
+The issuer signs `SHA256(ASCII("QRL-TOKEN-METADATA-V1") || body)`, where `body`
+contains every field from Version through Symbol. There is no NUL separator.
+The complete payload fits in one short APDU. A malformed or unauthenticated
+descriptor aborts the signing session. It is never accepted as unsigned metadata.
+
+The issuer's uncompressed 65-byte P-256 public key is set at build time:
+
+```sh
+make TOKEN_METADATA_PUBLIC_KEY=<130-hex-character-SEC1-public-key>
+```
+
+The build requires 130 hex characters starting with `04`, checks that the
+coordinates form a valid P-256 point, and rejects the public test key. Validation
+uses Python 3's standard library and stops the build on an invalid key.
+
+No production authority is configured by default: the metadata command returns
+`6A88` (`SW_TOKEN_METADATA_NO_ISSUER`), while existing native transfers and blind signing remain available.
+The issuer must curate tokens, ABI profiles, and stable symbol/decimals bindings.
+An issuer backend and wallet integration must provide signed QRL descriptors;
+Ethereum's existing 20-byte token metadata is not compatible with this payload.
+This release uses classical ECDSA for metadata authentication; QRL transaction
+signatures remain ML-DSA-87. A post-quantum metadata authority would require a
+versioned extension of this format and its verification implementation.
+
+For emulator tests only:
+
+```sh
+make DEBUG=1 TOKEN_METADATA_TEST_KEY=1
+pytest --device nanosp --token-metadata-test-key tests/test_token_transfer_cmd.py
+```
+
+The test issuer uses the publicly known P-256 scalar `1`, requires `DEBUG=1`, and
+displays `TEST token transfer` during review. The same key is rejected when
+provided as a production key. Never deploy the test-authority build for funds.
+Positive metadata tests skip only when the app reports no configured issuer.
+With `--token-metadata-test-key`, this response fails the test instead; invalid
+signatures always fail fixture setup. Negative authentication tests still run. Tests use synthetic contracts, not a
+claim that a real token has been approved or deployed on a particular network.
+
+#### Supported clear-signed calls
+
+`transfer(address,uint256)` and `approve(address,uint256)` are decoded:
+
+- Selector: `a9059cbb` for transfer, `095ea7b3` for approve (4 bytes).
+- Recipient or spender: one 64-byte QRVM ABI word; approve requires a nonzero spender.
+- Amount: one 64-byte word, with the upper 32 bytes zero (`uint256`).
+- Exact calldata length: 132 bytes; no additional bytes. The RLP parser retains
+  the first 256 calldata bytes for operation decoders and records the full length;
+  larger payloads continue to be streamed and hashed. This storage limit does not
+  broaden the supported clear-signing profile.
+- Token contract and full Chain ID must match the verified descriptor.
+- Native QRL value must be zero; access list must be empty.
+
+The screen shows the sending account, token amount/symbol, actual token
+recipient, token contract, Chain ID, and maximum fees in QRL, plus optional nonce
+and transaction hash. The token contract row is titled `Token contract`, or
+`Contract` on Nano, where the longer title does not fit. The signature covers the original complete transaction,
+including calldata. Recognition does not simulate execution or guarantee a
+successful transfer or the amount ultimately credited by a custom token.
+
+Approvals have a separate review: Owner, Spending limit, Spender, Token contract,
+Chain ID and QRL fees, plus optional nonce and transaction hash. A zero limit
+is presented as revocation in the review. Exactly `2^256 - 1` is displayed as
+`<symbol> Unlimited` with an explicit unlimited-spending confirmation on all
+four supported models, including Nano S+ and Nano X; smaller
+values always retain their exact numeric limit. Approval sets the new allowance
+and does not transfer tokens. The device neither queries the current allowance
+nor guarantees execution. Issuers must only attest fungible SQRCTF1-compatible
+contracts; the approve selector alone also exists in other token standards.
+
+Zero-address policy: token transfers retain the existing literal-recipient review,
+including a zero recipient, to preserve transfer compatibility. This is not a
+claim that the call succeeds, and the review does not infer a burn: standard
+SQRCTF1 contracts revert such transfers. Approvals use a stricter supported profile
+and require a nonzero spender; a zero spender is not a revoke-all instruction.
+Revocation is `approve(nonzero_spender, 0)`. This approval feature does not
+change the established transfer policy or simulate contract execution.
+
+Other calls, mismatching descriptors, noncanonical token arguments, native
+value, or nonempty access lists follow the existing blind-signing policy; with
+blind signing disabled they are rejected. `transferFrom`, NFT calls,
+routers, and general ABI decoding are outside this version's supported profile.
+
+Descriptors exist only in RAM for one signing session. `DATA_FIRST`, address
+requests, and aborted sessions invalidate them; none are persisted to NVM or
+reused automatically. Signature chunks additionally require an approved session.
+
+See `tests/application_client/token_metadata.py` for payload generation and
+`examples/token_call.py` for an interactive Speculos example.
+
+For manual approval review (no transaction is broadcast):
+
+```sh
+tests/venv/bin/python examples/token_call.py --test-key --operation approve --units 25000000
+tests/venv/bin/python examples/token_call.py --test-key --operation approve --units 0
+tests/venv/bin/python examples/token_call.py --test-key --operation approve --unlimited
+```
+
+Use `--url` for the emulator API endpoint and `--spender Q...` to change the
+authorized spender. The metadata APDU and session ordering remain unchanged.
+
 ## Status Words
 
 The following standard Status Words are returned for all APDUs.
@@ -379,8 +505,11 @@ The following standard Status Words are returned for all APDUs.
 |   6985   | SW_DENY                     | Rejected by user                                      |
 |   6A80   | SW_MESSAGE_INVALID          | Personal message contains unsupported text            |
 |   6A80   | SW_TYPED_DATA_INVALID       | Typed-data schema, value or review budget is invalid   |
+|   6982   | SW_TOKEN_METADATA_UNTRUSTED  | Token metadata authentication failed                   |
+|   6A80   | SW_TOKEN_METADATA_INVALID   | Malformed or unsupported token descriptor              |
 |   6A86   | SW_WRONG_P1P2               | Either P1 or P2 is incorrect                          |
 |   6A87   | SW_WRONG_DATA_LENGTH        | Lc or minimum APDU length is incorrect                |
+|   6A88   | SW_TOKEN_METADATA_NO_ISSUER | No token metadata authority configured                |
 |   6D00   | SW_INS_NOT_SUPPORTED        | No command exists with INS                            |
 |   6E00   | SW_CLA_NOT_SUPPORTED        | Bad CLA used for this application                     |
 |   B000   | SW_WRONG_RESPONSE_LENGTH    | Wrong response length (buffer size problem)           |
