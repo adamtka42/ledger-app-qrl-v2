@@ -1,5 +1,6 @@
 #pragma once
 
+#include "token_call.h"
 #include "typed_data.h"
 
 #define TYPED_DATA_UI_BYTES 2048
@@ -15,6 +16,13 @@ typedef struct {
     bool has_chain_id;
     bool has_verifying_contract;
     bool finished;
+    /* Optional issuer-signed token metadata, accepted before any payload byte. */
+    token_metadata_t token_metadata;
+    /* permit_kind_e; when not PERMIT_NONE the review holds token permit rows,
+     * led by permit_owner_pairs rows for the owner whose bytes are at permit_owner. */
+    uint8_t permit_kind;
+    uint8_t permit_owner_pairs;
+    uint16_t permit_owner;
 } typed_data_session_t;
 
 _Static_assert(sizeof(typed_data_session_t) <= 512,

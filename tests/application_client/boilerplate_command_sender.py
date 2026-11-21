@@ -138,10 +138,16 @@ class BoilerplateCommandSender:
         return self.backend.last_async_response
 
     @contextmanager
-    def sign_typed_data(self, path: str, payload: bytes) -> Generator[None, None, None]:
-        """Send a QRL schema-and-values payload; review happens on the final APDU."""
+    def sign_typed_data(self, path: str, payload: bytes,
+                        token_metadata: Optional[bytes] = None) -> Generator[None, None, None]:
+        """Send a QRL schema-and-values payload; review happens on the final APDU.
+
+        Token metadata, needed to clear-sign a token permit, goes before the payload."""
         self.backend.exchange(cla=CLA, ins=InsType.SIGN_TYPED_DATA, p1=0, p2=0,
                               data=pack_derivation_path(path) + len(payload).to_bytes(4, "big"))
+        if token_metadata is not None:
+            self.backend.exchange(cla=CLA, ins=InsType.PROVIDE_TOKEN_METADATA,
+                                  p1=0, p2=0, data=token_metadata)
         chunks = split_message(payload, MAX_APDU_LEN)
         if not chunks:
             raise ValueError("Typed data requires a nonempty schema-and-values payload")

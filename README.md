@@ -42,7 +42,7 @@ docker run --rm -v "$PWD:/app" -w /app/tests <image-with-test-deps> \
 (Add the packages from `tests/requirements.txt` to the dev-tools image's
 `/opt/venv` once with `pip install -r tests/requirements.txt`.)
 
-To run the token clear-signing tests, build with
+To run the token clear-signing tests (including token permits), build with
 `DEBUG=1 TOKEN_METADATA_TEST_KEY=1` and pass `--token-metadata-test-key` to pytest:
 
 ```sh

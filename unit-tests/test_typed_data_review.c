@@ -14,6 +14,7 @@
 #include "nbgl_use_case.h"
 #include "nbgl_fonts.h"
 #include "nbgl_layout.h"
+#include "permit.h"
 #include "request_context.h"
 #include "sw.h"
 
@@ -25,6 +26,8 @@ static bool derive_failure, format_failure, store_failure, spinner_active;
 static unsigned menu_calls, reset_calls, font_calls;
 static uint16_t expected_error, response;
 static bool layout_failure;
+static const char *expected_title = "Review typed data";
+static const char *expected_finish = "Sign message";
 
 void *test_pic(const void *address) {
     return (void *) address;
@@ -97,9 +100,9 @@ void nbgl_useCaseReview(int type,
                         void (*choice)(bool)) {
     assert_int_equal(type, TYPE_MESSAGE);
     assert_non_null(icon);
-    assert_string_equal(title, "Review typed data");
+    assert_string_equal(title, expected_title);
     assert_null(subtitle);
-    assert_string_equal(finish, "Sign message");
+    assert_string_equal(finish, expected_finish);
     assert_non_null(choice);
     assert_true(pairs->wrapping);
     spinner_active = false;
@@ -327,6 +330,161 @@ static void test_schema_account_is_distinct_from_signer(void **state) {
     reset_request_context();
 }
 
+/* Issuer-signed metadata for the token named by the permit fixtures. */
+static void provide_token(typed_data_session_t *session) {
+    token_metadata_t *metadata = &session->token_metadata;
+    memset(metadata, 0, sizeof(*metadata));
+    metadata->chain_id[sizeof(metadata->chain_id) - 1] = 1;
+    memset(metadata->contract, 0x22, sizeof(metadata->contract));
+    metadata->decimals = 6;
+    memcpy(metadata->symbol, "TKN", 4);
+    metadata->verified = true;
+}
+
+static void start_permit(const char *name, bool with_token) {
+    reset_request_context();
+    review = NULL;
+    uint8_t bytes[TYPED_DATA_MAX_PAYLOAD];
+    size_t length = vector(name, bytes);
+    typed_data_session_t *session = &G_context.typed_data;
+    assert_true(typed_data_session_init(session, length));
+    if (with_token) provide_token(session);
+    assert_true(typed_data_session_feed(session, bytes, length));
+    assert_true(typed_data_session_finish(session, page_length()));
+    G_context.req_type = CONFIRM_TYPED_DATA;
+    G_context.state = STATE_PARSED;
+}
+
+/* Join the fragments of one labelled value, returning how many rows it used. */
+static size_t joined_value(size_t first, const char *label, char *out, size_t size) {
+    size_t used = 0, count = 0, label_length = strlen(label);
+    for (size_t i = first; i < review->nbPairs; i++) {
+        const nbgl_contentTagValue_t *pair = &review->pairs[i];
+        if (strncmp(pair->item, label, label_length) != 0 ||
+            (pair->item[label_length] != '\0' && pair->item[label_length] != ' '))
+            break;
+        size_t length = strlen(pair->value);
+        assert_true(length < size - used);
+        memcpy(out + used, pair->value, length);
+        used += length;
+        count++;
+    }
+    out[used] = '\0';
+    return count;
+}
+
+static void test_permit_review(void **state) {
+    (void) state;
+    static const struct {
+        const char *name, *title, *finish, *limit;
+        bool own;
+    } cases[] = {
+        {"permit", "Review token spending permit", "Sign token\nspending permit", "TKN 25", true},
+        {"permit_revoke",
+         "Review token permit revocation",
+         "Sign token\npermit revocation",
+         "TKN 0",
+         true},
+        {"permit_other",
+         "Review unlimited spending permit",
+         "Sign unlimited\nspending permit",
+         "TKN Unlimited",
+         false},
+    };
+    char text[1 + 2 * ADDRESS_SIZE + 1], expected[sizeof(text)];
+    uint8_t address[ADDRESS_SIZE];
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        start_permit(cases[i].name, true);
+        expected_title = cases[i].title;
+        expected_finish = cases[i].finish;
+        assert_int_equal(ui_display_typed_data(), 0);
+        assert_non_null(review);
+        assert_string_equal(review->pairs[0].item, "Sign with");
+        assert_true(format_checksummed_address(G_context.address, expected, sizeof(expected)));
+        assert_string_equal(review->pairs[0].value, expected);
+
+        /* The owner is shown only when it is not the signing account. */
+        size_t next = 1 + joined_value(1, "Token owner", text, sizeof(text));
+        if (cases[i].own) {
+            assert_int_equal(next, 1);
+        } else {
+            memset(address, 0x44, sizeof(address));
+            assert_true(format_checksummed_address(address, expected, sizeof(expected)));
+            assert_true(next > 1);
+            assert_string_equal(text, expected);
+        }
+        assert_string_equal(review->pairs[next].item, "Spending limit");
+        assert_string_equal(review->pairs[next++].value, cases[i].limit);
+        memset(address, 0x11, sizeof(address));
+        assert_true(format_checksummed_address(address, expected, sizeof(expected)));
+        size_t rows = joined_value(next, "Spender", text, sizeof(text));
+        assert_true(rows > 0);
+        assert_string_equal(text, expected);
+        next += rows;
+        memset(address, 0x22, sizeof(address));
+        assert_true(format_checksummed_address(address, expected, sizeof(expected)));
+        rows = joined_value(next, "Token contract", text, sizeof(text));
+        assert_true(rows > 0);
+        assert_string_equal(text, expected);
+        next += rows;
+        assert_string_equal(review->pairs[next].item, "Chain ID");
+        assert_string_equal(review->pairs[next++].value, "1");
+        assert_string_equal(review->pairs[next].item, "Valid until");
+        assert_string_equal(review->pairs[next++].value, "2033-05-18 03:33:20 UTC");
+        assert_string_equal(review->pairs[next].item, "Permit nonce");
+        assert_string_equal(review->pairs[next++].value, "7");
+        assert_int_equal(next, review->nbPairs);
+        for (size_t pair = 0; pair < review->nbPairs; pair++) {
+            assert_string_not_equal(review->pairs[pair].item, "Primary type");
+            assert_true(strlen(review->pairs[pair].value) <= MOCK_MAX_FRAGMENT_LEN || pair == 0);
+        }
+    }
+    expected_title = "Review typed data";
+    expected_finish = "Sign message";
+    reset_request_context();
+}
+
+static void test_permit_without_token_is_generic(void **state) {
+    (void) state;
+    start_permit("permit", false);
+    assert_int_equal(G_context.typed_data.permit_kind, PERMIT_NONE);
+    assert_int_equal(ui_display_typed_data(), 0);
+    assert_string_equal(review->pairs[1].item, "Primary type");
+    assert_string_equal(review->pairs[1].value, "Permit");
+
+    /* Unauthenticated metadata is the same as none. */
+    reset_request_context();
+    uint8_t bytes[TYPED_DATA_MAX_PAYLOAD];
+    size_t length = vector("permit", bytes);
+    typed_data_session_t *session = &G_context.typed_data;
+    assert_true(typed_data_session_init(session, length));
+    provide_token(session);
+    session->token_metadata.verified = false;
+    assert_true(typed_data_session_feed(session, bytes, length));
+    assert_true(typed_data_session_finish(session, page_length()));
+    assert_int_equal(session->permit_kind, PERMIT_NONE);
+    reset_request_context();
+}
+
+static void test_permit_review_rejects_inconsistent_session(void **state) {
+    (void) state;
+    for (int corruption = 0; corruption < 2; corruption++) {
+        start_permit("permit", true);
+        typed_data_session_t *session = &G_context.typed_data;
+        assert_int_equal(session->permit_kind, PERMIT_LIMITED);
+        if (corruption == 0)
+            session->permit_owner_pairs = (uint8_t) (session->pair_count + 1);
+        else
+            session->permit_owner = TYPED_DATA_REVIEW_BYTES - ADDRESS_SIZE + 1;
+        menu_calls = 0;
+        expected_error = SW_BAD_STATE;
+        response = 0;
+        assert_int_equal(ui_display_typed_data(), 0);
+        assert_int_equal(response, SW_BAD_STATE);
+        assert_null(review);
+    }
+}
+
 static void test_label_length_boundary(void **state) {
     (void) state;
     /* 39 bytes plus " (64/64)" and NUL exactly fills the 48-byte title. */
@@ -397,6 +555,9 @@ int main(void) {
         cmocka_unit_test(test_review_roundtrip),
         cmocka_unit_test(test_layout_rejection_restores_text),
         cmocka_unit_test(test_schema_account_is_distinct_from_signer),
+        cmocka_unit_test(test_permit_review),
+        cmocka_unit_test(test_permit_without_token_is_generic),
+        cmocka_unit_test(test_permit_review_rejects_inconsistent_session),
         cmocka_unit_test(test_label_length_boundary),
         cmocka_unit_test(test_preparation_errors_restore_menu),
     };

@@ -248,3 +248,26 @@ def wide_example():
         "primaryType": "WideValues", "domain": {"name": "QRL VM64 Golden"},
         "message": {"amount": "0x" + "fedcba9876543210" * 8, "payload": "0x" + "0123456789abcdef" * 8},
     }
+
+
+def permit_example(owner, spender=bytes.fromhex("11" * 64), value=25_000_000, nonce=7,
+                   deadline=2_000_000_000, *, chain_id=1, contract=bytes.fromhex("22" * 64),
+                   name="Test Token"):
+    """Token spending permit: an off-chain signature with the effect of approve()."""
+    return {
+        "types": {
+            DOMAIN_TYPE: [{"name": n, "type": t} for n, t in _DOMAIN_FIELDS[:4]],
+            "Permit": [
+                {"name": "owner", "type": "address"},
+                {"name": "spender", "type": "address"},
+                {"name": "value", "type": "uint256"},
+                {"name": "nonce", "type": "uint256"},
+                {"name": "deadline", "type": "uint256"},
+            ],
+        },
+        "primaryType": "Permit",
+        "domain": {"name": name, "version": "1", "chainId": str(chain_id),
+                   "verifyingContract": "0x" + contract.hex()},
+        "message": {"owner": "0x" + owner.hex(), "spender": "0x" + spender.hex(),
+                    "value": str(value), "nonce": str(nonce), "deadline": str(deadline)},
+    }

@@ -10,6 +10,7 @@
 #include "glyphs.h"
 #include "menu.h"
 #include "nbgl_use_case.h"
+#include "permit.h"
 #include "sw.h"
 #include "validate.h"
 
@@ -88,6 +89,30 @@ static void review_choice(bool confirm) {
         nbgl_useCaseStatus("Message signing failed", false, ui_menu_main);
 }
 
+typedef struct {
+    const char *review;
+    const char *confirmation;
+} permit_titles_t;
+
+/* A permit has the effect of an approval but is not a transaction, so its
+ * titles say what is being signed rather than repeating the approval ones. */
+static const permit_titles_t PERMIT_TITLES[] = {
+#ifdef TOKEN_METADATA_TEST_KEY
+    [PERMIT_LIMITED] = {"TEST token permit", "Sign token\nspending permit"},
+    [PERMIT_REVOKE] = {"TEST revoke permit", "Sign token\npermit revocation"},
+    [PERMIT_UNLIMITED] = {"TEST unlimited permit", "Sign unlimited\nspending permit"},
+#else
+    [PERMIT_LIMITED] = {"Review token spending permit", "Sign token\nspending permit"},
+    [PERMIT_REVOKE] = {"Review token permit revocation", "Sign token\npermit revocation"},
+    [PERMIT_UNLIMITED] = {"Review unlimited spending permit", "Sign unlimited\nspending permit"},
+#endif
+};
+
+static bool is_permit(const typed_data_session_t *data) {
+    return data->permit_kind == PERMIT_LIMITED || data->permit_kind == PERMIT_REVOKE ||
+           data->permit_kind == PERMIT_UNLIMITED;
+}
+
 /* Sign with and Primary type, then Chain ID and Verifying contract when unspecified. */
 enum { MAX_DEVICE_PAIRS = 4 };
 
@@ -101,21 +126,31 @@ __attribute__((noinline)) static bool prepare_pairs(const typed_data_session_t *
     const char *review = typed_data_review();
     memset(pairs, 0, sizeof(pairs));
     memset(&list, 0, sizeof(list));
-    size_t count = 0;
-    /* Schema identifiers cannot contain the space in this device-owned label. */
+    size_t count = 0, first = 0;
     pairs[count].item = "Sign with";
     pairs[count++].value = account;
-    pairs[count].item = "Primary type";
-    pairs[count++].value = data->primary_type;
-    if (!data->has_chain_id) {
-        pairs[count].item = "Chain ID";
-        pairs[count++].value = "Not specified";
+    if (is_permit(data)) {
+        /* The token and network come from the permit rows themselves. The
+         * owner rows are redundant when the owner is the signing account. */
+        if (data->permit_owner_pairs > data->pair_count ||
+            data->permit_owner > TYPED_DATA_REVIEW_BYTES - ADDRESS_SIZE)
+            return false;
+        if (memcmp(review + data->permit_owner, G_context.address, ADDRESS_SIZE) == 0)
+            first = data->permit_owner_pairs;
+    } else {
+        /* Schema identifiers cannot contain the space in this device-owned label. */
+        pairs[count].item = "Primary type";
+        pairs[count++].value = data->primary_type;
+        if (!data->has_chain_id) {
+            pairs[count].item = "Chain ID";
+            pairs[count++].value = "Not specified";
+        }
+        if (!data->has_verifying_contract) {
+            pairs[count].item = "Verifying contract";
+            pairs[count++].value = "Not specified";
+        }
     }
-    if (!data->has_verifying_contract) {
-        pairs[count].item = "Verifying contract";
-        pairs[count++].value = "Not specified";
-    }
-    for (size_t i = 0; i < data->pair_count; i++) {
+    for (size_t i = first; i < data->pair_count; i++) {
         pairs[count].item = review + data->pairs[i].label;
         pairs[count].value = review + data->pairs[i].value;
         pairs[count++].forcePageStart = true;
@@ -139,12 +174,19 @@ int ui_display_typed_data(void) {
         return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
     if (!prepare_pairs(&G_context.typed_data)) return abort_display(SW_BAD_STATE);
+    const char *review_title = "Review typed data";
+    const char *confirmation_title = "Sign message";
+    if (is_permit(&G_context.typed_data)) {
+        const permit_titles_t *titles = &PERMIT_TITLES[G_context.typed_data.permit_kind];
+        review_title = PIC(titles->review);
+        confirmation_title = PIC(titles->confirmation);
+    }
     nbgl_useCaseReview(TYPE_MESSAGE,
                        &list,
                        &ICON_APP_BOILERPLATE,
-                       "Review typed data",
+                       review_title,
                        NULL,
-                       "Sign message",
+                       confirmation_title,
                        review_choice);
     return 0;
 }

@@ -66,6 +66,8 @@ typedef struct {
     typed_type_t types[TYPED_DATA_MAX_TYPES];
     typed_field_t fields[TYPED_DATA_MAX_FIELDS];
     typed_review_pair_t pairs[TYPED_DATA_MAX_PAIRS];
+    /* Payload offset of the most recent primitive value read for each field. */
+    uint16_t value_offset[TYPED_DATA_MAX_FIELDS];
     uint8_t digest[32];
     uint32_t expected_len;
     size_t received_len;
@@ -80,6 +82,10 @@ typedef struct {
     bool has_chain_id;
     bool has_verifying_contract;
     bool finished;
+    /* Set by permit_prepare() when the review was replaced by permit rows. */
+    uint8_t permit_kind;
+    uint8_t permit_owner_pairs;
+    uint16_t permit_owner;
     typed_data_page_length_t review_page_length;
 } typed_data_t;
 
@@ -97,5 +103,15 @@ bool typed_data_feed(typed_data_t *data, const uint8_t *bytes, size_t length);
 /** Validate/hash and build the review. page_length bounds each device fragment;
  * NULL retains whole values for host-side tools without changing the digest. */
 bool typed_data_finish(typed_data_t *data, typed_data_page_length_t page_length);
+/** Discard the prepared generic review so a recognised message profile can
+ * replace it with its own rows. The digest and parsed schema are unaffected. */
+void typed_data_review_reset(typed_data_t *data);
+/** Append one labelled value, split into device-sized fragments like any other. */
+bool typed_data_review_add(typed_data_t *data, const char *label, char *text);
+/** Append raw bytes that are not displayed, returning their review offset. */
+bool typed_data_review_blob(typed_data_t *data,
+                            const uint8_t *bytes,
+                            size_t length,
+                            uint16_t *offset);
 /** Copy a schema identifier into a NUL-terminated output buffer. */
 bool typed_data_name(const typed_data_t *data, typed_span_t name, char *out, size_t size);
