@@ -29,7 +29,7 @@ class InsType(IntEnum):
     GET_APP_NAME   = 0x04
     GET_PUBLIC_KEY = 0x05
     SIGN_TX        = 0x06
-    GET_APP_CONFIGURATION = 0x0D
+    GET_APP_CONFIGURATION = 0x0E
 
 class Errors(IntEnum):
     SW_DENY                    = 0x6985

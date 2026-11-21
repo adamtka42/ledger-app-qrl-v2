@@ -177,7 +177,7 @@ remain controlled by the user through the device UI.
 
 | CLA | INS | P1 | P2 | Lc |
 | --- | --- | --- | --- | --- |
-| E0 | 0D | 00 | 00 | 00 |
+| E0 | 0E | 00 | 00 | 00 |
 
 No input data. Nonzero P1/P2 returns `6A86`; nonzero Lc returns `6A87`.
 The response contains exactly five bytes, followed by `9000`:
