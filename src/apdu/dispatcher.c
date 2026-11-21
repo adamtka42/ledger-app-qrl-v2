@@ -33,6 +33,7 @@
 #include "sign_tx.h"
 #include "sign_personal_message.h"
 #include "sign_typed_data.h"
+#include "provide_token_metadata.h"
 
 int apdu_dispatcher(const command_t *cmd) {
     LEDGER_ASSERT(cmd != NULL, "NULL cmd");
@@ -87,6 +88,8 @@ int apdu_dispatcher(const command_t *cmd) {
             buf.size = cmd->lc;
             buf.offset = 0;
             return handler_sign_personal_message(&buf, cmd->p1, cmd->p2);
+        case PROVIDE_TOKEN_METADATA:
+            return handler_provide_token_metadata(cmd->data, cmd->lc, cmd->p1, cmd->p2);
         case SIGN_TX:
             // The handler also aborts the session on invalid or empty commands.
             buf.ptr = cmd->data;

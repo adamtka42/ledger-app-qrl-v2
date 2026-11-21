@@ -141,6 +141,20 @@ foreach(device touch nano)
         " -Wl,--wrap=format_checksummed_address,--wrap=typed_data_store_ui")
     add_test(${review_target} ${review_target})
 endforeach()
+add_library(token_call ../src/token_call.c)
+add_executable(test_token_transfer test_token_transfer.c)
+target_link_libraries(test_token_transfer PUBLIC token_call tx_stream tx_format cmocka gcov)
+add_test(test_token_transfer test_token_transfer)
+
+# Validate the real Makefile's issuer configuration using only Python's stdlib.
+find_program(TOKEN_METADATA_TEST_PYTHON NAMES python3)
+if(NOT TOKEN_METADATA_TEST_PYTHON)
+    message(FATAL_ERROR "Python 3 is required for token metadata key tests")
+endif()
+add_test(NAME test_token_metadata_key
+         COMMAND ${TOKEN_METADATA_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/test_token_metadata_key.py)
+add_test(NAME test_transaction_builder
+         COMMAND ${TOKEN_METADATA_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/test_transaction_builder.py)
 
 # Exercise real crypto code with mocked Ledger syscalls and observed erasure.
 add_executable(test_crypto_cleanup
@@ -168,3 +182,5 @@ add_test(test_crypto_cleanup test_crypto_cleanup)
 # These transaction-only callback tests have no staged typed-data storage.
 target_sources(test_validate_transaction PRIVATE mocks/typed_data_storage.c)
 target_sources(test_transaction_review PRIVATE mocks/typed_data_storage.c)
+# Approval review uses token-call classification helpers.
+target_link_libraries(test_transaction_review PRIVATE token_call)
