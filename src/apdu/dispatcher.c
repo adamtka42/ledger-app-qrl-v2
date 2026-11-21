@@ -79,6 +79,8 @@ int apdu_dispatcher(const command_t *cmd) {
             return handler_get_public_key(&buf, (bool) cmd->p1);
         case PROVIDE_TOKEN_METADATA:
             return handler_provide_token_metadata(cmd->data, cmd->lc, cmd->p1, cmd->p2);
+        case PROVIDE_NFT_METADATA:
+            return handler_provide_nft_metadata(cmd->data, cmd->lc, cmd->p1, cmd->p2);
         case PROVIDE_CONTRACT_DESCRIPTOR:
             return handler_provide_contract_descriptor(cmd->data, cmd->lc, cmd->p1, cmd->p2);
         case SIGN_TX:

@@ -4,3 +4,6 @@
 #include <stdint.h>
 
 int handler_provide_token_metadata(const uint8_t *data, size_t len, uint8_t p1, uint8_t p2);
+
+/* NFT collection metadata, attested by the same issuer under its own domain. */
+int handler_provide_nft_metadata(const uint8_t *data, size_t len, uint8_t p1, uint8_t p2);

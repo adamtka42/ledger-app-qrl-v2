@@ -62,7 +62,7 @@ int handler_provide_contract_descriptor(const uint8_t *data, size_t len, uint8_t
     if (p1 != 0 || p2 != 0) return abort_metadata(SW_WRONG_P1P2);
     if (G_context.req_type != CONFIRM_TRANSACTION || G_context.state != STATE_RECEIVING ||
         G_context.tx_info.stream.total_len != 0 || G_context.tx_info.token_metadata.verified ||
-        G_context.tx_info.contract_descriptor.verified)
+        G_context.tx_info.nft_metadata.verified || G_context.tx_info.contract_descriptor.verified)
         return abort_metadata(SW_BAD_STATE);
 
     contract_descriptor_t *descriptor = &G_context.tx_info.contract_descriptor;

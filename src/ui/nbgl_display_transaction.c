@@ -58,7 +58,16 @@ static char g_contract_labels[CONTRACT_CALL_MAX_FIELDS][CONTRACT_CALL_LABEL_MAX 
 // Maximum review fields: From/Owner, Amount/Spending limit, To/Spender or Operation, Token
 // contract, Chain ID, Gas limit, Priority fee / gas, Max fees, Nonce, Transaction hash.
 // Contract calls add Operation and up to three numbered arguments to native fields.
-enum { MAX_REVIEW_PAIRS = 10 + CONTRACT_CALL_MAX_FIELDS };
+// NFT transfers show From, NFT owner, To, Collection, NFT contract, Token ID and Quantity.
+enum { MAX_REVIEW_PAIRS = 10 + CONTRACT_CALL_MAX_FIELDS, NFT_REVIEW_PAIRS = 13 };
+_Static_assert(NFT_REVIEW_PAIRS <= MAX_REVIEW_PAIRS, "NFT review does not fit");
+// NFT reviews borrow the contract argument buffers; the two flows are exclusive.
+enum { NFT_VALUE_OWNER, NFT_VALUE_TOKEN_ID, NFT_VALUE_QUANTITY };
+_Static_assert(CONTRACT_CALL_MAX_FIELDS > NFT_VALUE_QUANTITY &&
+                   sizeof(g_contract_values[0]) > TX_FORMAT_MAX_DECIMAL_DIGITS &&
+                   sizeof(g_contract_values[0]) >= sizeof(g_from_address),
+               "NFT values do not fit the contract argument buffers");
+_Static_assert(ADDRESS_SIZE == ADDRESS_LENGTH, "calldata addresses are full account addresses");
 static nbgl_contentTagValue_t pairs[MAX_REVIEW_PAIRS];
 static nbgl_contentTagValueList_t pairList;
 
@@ -90,6 +99,48 @@ static size_t approval_mode(const token_call_t *token) {
     if (token_call_is_unlimited_approval(token)) return APPROVAL_UNLIMITED;
     if (token_call_is_approval_revocation(token)) return APPROVAL_REVOKE;
     return APPROVAL_LIMITED;
+}
+
+enum { NFT_SEND, NFT_APPROVE, NFT_REVOKE, NFT_APPROVE_ALL, NFT_REVOKE_ALL };
+static const approval_titles_t NFT_TITLES[] = {
+#ifdef TOKEN_METADATA_TEST_KEY
+    [NFT_SEND] = {"TEST NFT transfer", "Send NFT"},
+    [NFT_APPROVE] = {"TEST NFT approval", "Approve NFT"},
+    [NFT_REVOKE] = {"TEST revoke NFT approval", "Revoke NFT\napproval"},
+    [NFT_APPROVE_ALL] = {"TEST approve NFT collection", "Approve entire\nNFT collection"},
+    [NFT_REVOKE_ALL] = {"TEST revoke NFT collection", "Revoke NFT\ncollection approval"},
+#else
+    [NFT_SEND] = {"Send NFT", "Send NFT"},
+    [NFT_APPROVE] = {"Approve NFT", "Approve NFT"},
+    [NFT_REVOKE] = {"Revoke NFT approval", "Revoke NFT\napproval"},
+    [NFT_APPROVE_ALL] = {"Approve entire NFT collection", "Approve entire\nNFT collection"},
+    [NFT_REVOKE_ALL] = {"Revoke NFT collection approval", "Revoke NFT\ncollection approval"},
+#endif
+};
+
+static size_t nft_title_mode(const nft_call_t *nft) {
+    if (nft->kind == NFT_CALL_APPROVE)
+        return nft_call_is_approval_revocation(nft) ? NFT_REVOKE : NFT_APPROVE;
+    if (nft->kind == NFT_CALL_APPROVE_ALL) return nft->approved ? NFT_APPROVE_ALL : NFT_REVOKE_ALL;
+    return NFT_SEND;
+}
+
+// The NFT values a review shows next to the shared address rows: the owner when
+// it is not the signer, the token ID and the quantity.
+static uint16_t format_nft_values(const nft_call_t *nft, bool show_owner) {
+    char *owner = g_contract_values[NFT_VALUE_OWNER];
+    char *token_id = g_contract_values[NFT_VALUE_TOKEN_ID];
+    char *quantity = g_contract_values[NFT_VALUE_QUANTITY];
+    const size_t size = sizeof(g_contract_values[0]);
+    if (show_owner && !format_checksummed_address(nft->owner, owner, size))
+        return SW_DISPLAY_ADDRESS_FAIL;
+    if (nft->kind != NFT_CALL_APPROVE_ALL &&
+        !uint8_array_to_decimal(nft->token_id, sizeof(nft->token_id), token_id, size))
+        return SW_DISPLAY_AMOUNT_FAIL;
+    if (nft->has_quantity &&
+        !uint8_array_to_decimal(nft->quantity, sizeof(nft->quantity), quantity, size))
+        return SW_DISPLAY_AMOUNT_FAIL;
+    return SW_OK;
 }
 
 static void bytes_to_lower_hex(const uint8_t *bytes, size_t len, char *out) {
@@ -226,6 +277,15 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     const token_metadata_t *metadata = &G_context.tx_info.token_metadata;
     const bool is_token = token->kind != TOKEN_CALL_NONE;
     const bool is_approval = token->kind == TOKEN_CALL_APPROVE;
+    const nft_call_t *nft = &G_context.tx_info.nft_call;
+    const nft_metadata_t *collection = &G_context.tx_info.nft_metadata;
+    const bool is_nft = nft->kind != NFT_CALL_NONE;
+    const bool is_nft_transfer = nft->kind == NFT_CALL_TRANSFER;
+    // Clearing a single approval names no spender; revoking an operator still does.
+    const bool is_nft_revocation = nft_call_is_approval_revocation(nft);
+    if (is_nft && (is_blind_signed || is_token || is_contract || !collection->verified)) {
+        return abort_display(SW_BAD_STATE);
+    }
     const char *review_title = "Review transaction\n";
 #ifdef SCREEN_SIZE_WALLET
     const char *confirmation_title = "Sign transaction\n";
@@ -242,6 +302,12 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
 #else
         review_title = "Send tokens";
 #endif
+    }
+
+    if (is_nft) {
+        const size_t mode = nft_title_mode(nft);
+        review_title = PIC(NFT_TITLES[mode].review);
+        confirmation_title = PIC(NFT_TITLES[mode].confirmation);
     }
 
     if (is_contract) {
@@ -291,12 +357,12 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
 
     // An empty recipient creates a contract; it is not the zero address.
     memset(g_to_address, 0, sizeof(g_to_address));
-    if (!is_contract_creation && !format_checksummed_address(is_token ? token->target : tx->to,
-                                                             g_to_address,
-                                                             sizeof(g_to_address))) {
+    const uint8_t *to = is_token ? token->target : is_nft ? nft->target : tx->to;
+    if (!is_contract_creation &&
+        !format_checksummed_address(to, g_to_address, sizeof(g_to_address))) {
         return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
-    if (is_token &&
+    if ((is_token || is_nft) &&
         !format_checksummed_address(tx->to, g_token_contract, sizeof(g_token_contract))) {
         return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
@@ -325,6 +391,14 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         return abort_display(SW_DISPLAY_AMOUNT_FAIL);
     snprintf(g_gas_tip_cap, sizeof(g_gas_tip_cap), "QRL %s", amount);
 
+    // An approved operator may move a token it does not hold itself.
+    const bool show_nft_owner =
+        is_nft_transfer && memcmp(nft->owner, G_context.address, ADDRESS_SIZE) != 0;
+    if (is_nft) {
+        const uint16_t sw = format_nft_values(nft, show_nft_owner);
+        if (sw != SW_OK) return abort_display(sw);
+    }
+
     size_t count = 0;
 #define ADD_PAIR(label, text)                   \
     do {                                        \
@@ -334,12 +408,32 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         pairs[count].item = (label);            \
         pairs[count++].value = (text);          \
     } while (0)
-    ADD_PAIR(is_approval ? "Owner" : "From", g_from_address);
-    ADD_PAIR(is_approval ? "Spending limit" : "Amount", g_amount);
-    if (is_contract_creation) {
-        ADD_PAIR("Operation", "Create contract");
+    if (is_nft) {
+        ADD_PAIR(is_nft_transfer ? "From" : "Owner", g_from_address);
+        if (show_nft_owner) ADD_PAIR("NFT owner", g_contract_values[NFT_VALUE_OWNER]);
+        if (is_nft_transfer) {
+            ADD_PAIR("To", g_to_address);
+        } else if (nft->kind == NFT_CALL_APPROVE_ALL) {
+            ADD_PAIR("Operator", g_to_address);
+        } else if (!is_nft_revocation) {
+            ADD_PAIR("Spender", g_to_address);
+        }
+        ADD_PAIR("Collection", collection->name);
+        ADD_PAIR("NFT contract", g_token_contract);
+        if (nft->kind != NFT_CALL_APPROVE_ALL) {
+            ADD_PAIR("Token ID", g_contract_values[NFT_VALUE_TOKEN_ID]);
+        } else if (nft->approved) {
+            ADD_PAIR("Access", "All NFTs in collection");
+        }
+        if (nft->has_quantity) ADD_PAIR("Quantity", g_contract_values[NFT_VALUE_QUANTITY]);
     } else {
-        ADD_PAIR(is_approval ? "Spender" : "To", g_to_address);
+        ADD_PAIR(is_approval ? "Owner" : "From", g_from_address);
+        ADD_PAIR(is_approval ? "Spending limit" : "Amount", g_amount);
+        if (is_contract_creation) {
+            ADD_PAIR("Operation", "Create contract");
+        } else {
+            ADD_PAIR(is_approval ? "Spender" : "To", g_to_address);
+        }
     }
     if (is_token) {
 #ifdef SCREEN_SIZE_WALLET

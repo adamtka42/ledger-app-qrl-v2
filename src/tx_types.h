@@ -15,7 +15,7 @@
 #define ADDRESS_LENGTH 64
 #define MAX_FIELD_SIZE 32
 /** Maximum calldata prefix retained for operation decoders, independent of the ABI. */
-#define TX_CALLDATA_MAX_LEN 256u
+#define TX_CALLDATA_MAX_LEN 388u
 
 /**
  * Decoded fields of a QRL v2.0 type-2 transaction (sighash preimage).

@@ -10,6 +10,7 @@
 #include "tx_types.h"
 #include "token_call.h"
 #include "contract_call.h"
+#include "nft_call.h"
 #include "keccak256.h"  // keccak256_ctx
 
 /**
@@ -22,7 +23,8 @@ typedef enum {
     SIGN_TX = 0x06,         /// sign transaction with BIP32 path
     VERIFY_MSG = 0x07,      /// verify message with BIP32 path
     PROVIDE_TOKEN_METADATA = 0x0A,
-    PROVIDE_CONTRACT_DESCRIPTOR = 0x0B  /// authenticated static contract call description
+    PROVIDE_CONTRACT_DESCRIPTOR = 0x0B,  /// authenticated static contract call description
+    PROVIDE_NFT_METADATA = 0x0C          /// authenticated NFT collection name
 } command_e;
 /**
  * Enumeration with parsing state.
@@ -63,6 +65,8 @@ typedef struct {
     token_call_t token_call;
     contract_descriptor_t contract_descriptor;  /// verified and consumed within this session
     bool contract_call;                         /// complete transaction matched descriptor
+    nft_metadata_t nft_metadata;                /// authenticated for this signing session only
+    nft_call_t nft_call;
 } transaction_ctx_t;
 
 /**

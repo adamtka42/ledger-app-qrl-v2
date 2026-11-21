@@ -31,6 +31,7 @@ class InsType(IntEnum):
     SIGN_TX        = 0x06
     PROVIDE_TOKEN_METADATA = 0x0A
     PROVIDE_CONTRACT_DESCRIPTOR = 0x0B
+    PROVIDE_NFT_METADATA = 0x0C
 
 class Errors(IntEnum):
     SW_TOKEN_METADATA_INVALID  = 0x6A80
@@ -109,7 +110,8 @@ class BoilerplateCommandSender:
     @contextmanager
     def sign_tx(self, path: str, transaction: bytes,
                 token_metadata: Optional[bytes] = None,
-                contract_descriptor: Optional[bytes] = None) -> Generator[None, None, None]:
+                contract_descriptor: Optional[bytes] = None,
+                nft_metadata: Optional[bytes] = None) -> Generator[None, None, None]:
         self.backend.exchange(cla=CLA,
                               ins=InsType.SIGN_TX,
                               p1=0x00,
@@ -118,6 +120,9 @@ class BoilerplateCommandSender:
         if token_metadata is not None:
             self.backend.exchange(cla=CLA, ins=InsType.PROVIDE_TOKEN_METADATA,
                                   p1=0, p2=0, data=token_metadata)
+        if nft_metadata is not None:
+            self.backend.exchange(cla=CLA, ins=InsType.PROVIDE_NFT_METADATA,
+                                  p1=0, p2=0, data=nft_metadata)
         if contract_descriptor is not None:
             self.backend.exchange(cla=CLA, ins=InsType.PROVIDE_CONTRACT_DESCRIPTOR,
                                   p1=0, p2=0, data=contract_descriptor)

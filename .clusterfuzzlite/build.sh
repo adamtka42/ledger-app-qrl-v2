@@ -10,4 +10,6 @@ mv ./build/fuzz_tx_format "${OUT}"
 mv ./build/fuzz_contract_call "${OUT}"
 cp fuzz_contract_call.options "${OUT}"
 python3 generate_contract_corpus.py "${OUT}/fuzz_contract_call_seed_corpus.zip"
+mv ./build/fuzz_nft_call "${OUT}"
+python3 generate_nft_corpus.py "${OUT}/fuzz_nft_call_seed_corpus.zip"
 popd
