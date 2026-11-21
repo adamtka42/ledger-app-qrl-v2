@@ -43,8 +43,9 @@ static char g_amount[TX_FORMAT_MAX_AMOUNT_LEN + 5];
 static char g_to_address[1 + ADDRESS_SIZE * 2 + 1];
 static char g_max_fees[TX_FORMAT_MAX_AMOUNT_LEN + 5];
 // Either the bare decimal chain ID or "<network name> (<chain ID>)".
-static char g_chain_id[TX_FORMAT_MAX_DECIMAL_DIGITS + 1];
-_Static_assert(sizeof(g_chain_id) >= NETWORK_NAME_MAX_LEN + sizeof(" (18446744073709551615)"),
+static char g_chain_label[TX_FORMAT_MAX_DECIMAL_DIGITS + 1];
+// The longest network label: the longest name and UINT64_MAX in parentheses.
+_Static_assert(sizeof(g_chain_label) >= NETWORK_NAME_MAX_LEN + sizeof(" (18446744073709551615)"),
                "network label does not fit");
 static char g_nonce[21];
 static char g_gas_limit[21];
@@ -67,6 +68,16 @@ static void bytes_to_lower_hex(const uint8_t *bytes, size_t len, char *out) {
         out[2 * i + 1] = hex[bytes[i] & 0x0f];
     }
     out[2 * len] = '\0';
+}
+
+// Turn the decimal chain ID in label into "<name> (<chain ID>)".
+static bool prepend_network_name(char *label, size_t size, const char *name) {
+    char digits[TX_FORMAT_MAX_DECIMAL_DIGITS + 1];
+    const size_t digits_len = strlen(label);
+    if (digits_len >= sizeof(digits)) return false;
+    memcpy(digits, label, digits_len + 1);
+    const int written = snprintf(label, size, "%s (%s)", name, digits);
+    return written > 0 && (size_t) written < size;
 }
 
 // called when long press button on 3rd page is long-touched or when reject footer is touched
@@ -186,7 +197,10 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     snprintf(g_max_fees, sizeof(g_max_fees), "QRL %s", max_fees);
 
     // Setup data to display
-    if (!uint8_array_to_decimal(tx->chain_id, tx->chain_id_len, g_chain_id, sizeof(g_chain_id)) ||
+    if (!uint8_array_to_decimal(tx->chain_id,
+                                tx->chain_id_len,
+                                g_chain_label,
+                                sizeof(g_chain_label)) ||
         !uint8_array_to_decimal(tx->gas, tx->gas_len, g_gas_limit, sizeof(g_gas_limit)) ||
         !format_qrl_amount(tx->gas_tip_cap, tx->gas_tip_cap_len, amount, sizeof(amount)))
         return abort_display(SW_DISPLAY_AMOUNT_FAIL);
@@ -194,15 +208,8 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
 
     // A listed network is shown by name, keeping the number it was matched on.
     const char *network = network_name(tx->chain_id, tx->chain_id_len);
-    if (network != NULL) {
-        const size_t name_len = strlen(network), digits_len = strlen(g_chain_id);
-        if (name_len + digits_len + sizeof(" ()") > sizeof(g_chain_id))
-            return abort_display(SW_DISPLAY_AMOUNT_FAIL);
-        memmove(g_chain_id + name_len + 2, g_chain_id, digits_len);
-        memcpy(g_chain_id, network, name_len);
-        memcpy(g_chain_id + name_len, " (", 2);
-        memcpy(g_chain_id + name_len + 2 + digits_len, ")", 2);
-    }
+    if (network != NULL && !prepend_network_name(g_chain_label, sizeof(g_chain_label), network))
+        return abort_display(SW_DISPLAY_AMOUNT_FAIL);
 
     size_t count = 0;
 #define ADD_PAIR(label, text)          \
@@ -217,7 +224,7 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     } else {
         ADD_PAIR("To", g_to_address);
     }
-    ADD_PAIR(network != NULL ? "Network" : "Chain ID", g_chain_id);
+    ADD_PAIR(network != NULL ? "Network" : "Chain ID", g_chain_label);
     ADD_PAIR("Gas limit", g_gas_limit);
     ADD_PAIR("Priority fee / gas", g_gas_tip_cap);
     ADD_PAIR("Max fees", g_max_fees);

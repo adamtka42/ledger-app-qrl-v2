@@ -12,6 +12,6 @@
  * @param[in] chain_id      Big-endian chain ID as carried by the transaction.
  * @param[in] chain_id_len  Length of chain_id in bytes.
  *
- * @return the name from networks.def, or NULL when the chain ID is not listed.
+ * @return the name from the table in network.c, or NULL when the chain ID is not listed.
  */
 const char *network_name(const uint8_t *chain_id, size_t chain_id_len);

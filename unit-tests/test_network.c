@@ -5,7 +5,8 @@
 #include <string.h>
 #include <cmocka.h>
 
-#include "network.h"
+/* The table is static, so this test compiles network.c itself. */
+#include "network.c"
 
 static void test_listed_networks(void **state) {
     (void) state;
@@ -44,26 +45,21 @@ static void test_leading_zeros_do_not_change_the_value(void **state) {
     assert_null(network_name(padded, sizeof(padded)));
 }
 
-/* networks.def requires unique chain IDs: a repeated one would silently
- * keep the name of its first entry. */
-static void test_every_listed_chain_id_has_one_name(void **state) {
+/* A repeated chain ID would silently keep the name of its first entry, and C
+ * accepts a name one character too long by dropping its terminator. */
+static void test_every_listed_network_is_well_formed(void **state) {
     (void) state;
-    static const struct {
-        uint64_t chain_id;
-        const char *name;
-    } listed[] = {
-#define NETWORK(id, text) {UINT64_C(id), text},
-#include "networks.def"
-#undef NETWORK
-    };
-    const size_t count = sizeof(listed) / sizeof(listed[0]);
+    const size_t count = sizeof(NETWORKS) / sizeof(NETWORKS[0]);
     assert_true(count > 0);
     for (size_t i = 0; i < count; i++) {
+        const network_t *listed = &NETWORKS[i];
+        assert_true(listed->name[0] != '\0');
+        assert_non_null(memchr(listed->name, '\0', sizeof(listed->name)));
         uint8_t chain_id[8];
         for (size_t j = 0; j < sizeof(chain_id); j++)
-            chain_id[j] = (uint8_t) (listed[i].chain_id >> (8 * (sizeof(chain_id) - 1 - j)));
-        assert_string_equal(network_name(chain_id, sizeof(chain_id)), listed[i].name);
-        for (size_t j = 0; j < i; j++) assert_true(listed[i].chain_id != listed[j].chain_id);
+            chain_id[j] = (uint8_t) (listed->chain_id >> (8 * (sizeof(chain_id) - 1 - j)));
+        assert_ptr_equal(network_name(chain_id, sizeof(chain_id)), listed->name);
+        for (size_t j = 0; j < i; j++) assert_true(listed->chain_id != NETWORKS[j].chain_id);
     }
 }
 
@@ -72,7 +68,7 @@ int main(void) {
         cmocka_unit_test(test_listed_networks),
         cmocka_unit_test(test_unlisted_networks),
         cmocka_unit_test(test_leading_zeros_do_not_change_the_value),
-        cmocka_unit_test(test_every_listed_chain_id_has_one_name),
+        cmocka_unit_test(test_every_listed_network_is_well_formed),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

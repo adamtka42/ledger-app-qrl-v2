@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Transactions on a network listed in `src/networks.def` are reviewed as `Network: <name> (<chain ID>)` instead of a bare `Chain ID`. Unlisted chain IDs are displayed as before
+- Transactions on a network listed in `src/network.c` are reviewed as `Network: <name> (<chain ID>)` instead of a bare `Chain ID`. Unlisted chain IDs are displayed as before
 
 ### Changed
 

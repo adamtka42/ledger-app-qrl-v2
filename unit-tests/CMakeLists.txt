@@ -66,10 +66,11 @@ add_library(tx_stream ../src/tx_stream.c)
 target_link_libraries(test_tx_stream PUBLIC tx_stream cmocka gcov)
 add_test(test_tx_stream test_tx_stream)
 
-# network names come from the compiled-in list in src/networks.def
+# network names come from the compiled-in table in src/network.c;
+# test_network compiles that file itself to reach the static table
 add_executable(test_network test_network.c)
 add_library(network ../src/network.c)
-target_link_libraries(test_network PUBLIC network cmocka gcov)
+target_link_libraries(test_network PUBLIC cmocka gcov)
 add_test(test_network test_network)
 
 add_executable(test_validate_transaction
