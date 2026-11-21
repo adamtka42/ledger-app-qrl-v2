@@ -51,6 +51,7 @@ pytest tests --device flex --token-metadata-test-key
 
 This option makes a missing issuer (`6A88`) fail the test instead of skipping it.
 Without it, builds with no configured issuer skip the positive token tests.
+The NFT clear-signing tests use the same issuer and option.
 Metadata authentication failures (`6982`) always fail fixture setup.
 CI runs both the default build and a separate test-key build for all supported devices.
 The public test key is for emulator testing only.

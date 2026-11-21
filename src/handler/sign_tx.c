@@ -113,13 +113,15 @@ int handler_sign_tx(buffer_t *cdata, uint8_t p1, uint8_t p2) {
         bool token = token_call_prepare(tx,
                                         &G_context.tx_info.token_metadata,
                                         &G_context.tx_info.token_call);
+        bool nft =
+            nft_call_prepare(tx, &G_context.tx_info.nft_metadata, &G_context.tx_info.nft_call);
         const contract_descriptor_t *descriptor = &G_context.tx_info.contract_descriptor;
         G_context.tx_info.contract_call = contract_call_matches(tx, descriptor);
         if (descriptor->verified && !G_context.tx_info.contract_call) {
             return abort_sign_tx(SW_CONTRACT_CALL_MISMATCH);
         }
-        bool blind =
-            (tx->has_data || tx->has_access_list) && !token && !G_context.tx_info.contract_call;
+        bool blind = (tx->has_data || tx->has_access_list) && !token && !nft &&
+                     !G_context.tx_info.contract_call;
         if (blind && !N_storage.enable_blind_signing) {
             return abort_sign_tx(SW_DENY);
         }

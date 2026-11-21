@@ -148,6 +148,13 @@ set_property(TARGET test_transaction_review_nano APPEND_STRING PROPERTY LINK_FLA
 target_link_libraries(test_transaction_review_nano PRIVATE tx_format address_format hashes token_call contract_call cmocka gcov)
 add_test(test_transaction_review_nano test_transaction_review_nano)
 
+add_library(nft_call ../src/nft_call.c)
+add_executable(test_nft_call test_nft_call.c)
+target_link_libraries(test_nft_call PRIVATE nft_call cmocka gcov)
+add_test(test_nft_call test_nft_call)
+target_link_libraries(test_transaction_review PRIVATE nft_call)
+target_link_libraries(test_transaction_review_nano PRIVATE nft_call)
+
 add_executable(test_signed_metadata test_signed_metadata.c ../src/signed_metadata.c)
 target_include_directories(test_signed_metadata BEFORE PRIVATE mocks/metadata)
 target_link_libraries(test_signed_metadata PRIVATE cmocka gcov)

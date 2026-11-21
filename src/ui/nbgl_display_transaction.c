@@ -55,7 +55,16 @@ static char g_contract_labels[CONTRACT_CALL_MAX_FIELDS][CONTRACT_CALL_LABEL_MAX 
 // Maximum review fields: From/Owner, Amount/Spending limit, To/Spender or Operation, Token
 // contract, Chain ID, Gas limit, Priority fee / gas, Max fees, Nonce, Transaction hash.
 // Contract calls add Operation and up to three numbered arguments to native fields.
-enum { MAX_REVIEW_PAIRS = 10 + CONTRACT_CALL_MAX_FIELDS };
+// NFT transfers show From, NFT owner, To, Collection, NFT contract, Token ID and Quantity.
+enum { MAX_REVIEW_PAIRS = 10 + CONTRACT_CALL_MAX_FIELDS, NFT_REVIEW_PAIRS = 13 };
+_Static_assert(NFT_REVIEW_PAIRS <= MAX_REVIEW_PAIRS, "NFT review does not fit");
+// NFT reviews borrow the contract argument buffers; the two flows are exclusive.
+enum { NFT_VALUE_OWNER, NFT_VALUE_TOKEN_ID, NFT_VALUE_QUANTITY };
+_Static_assert(CONTRACT_CALL_MAX_FIELDS > NFT_VALUE_QUANTITY &&
+                   sizeof(g_contract_values[0]) > TX_FORMAT_MAX_DECIMAL_DIGITS &&
+                   sizeof(g_contract_values[0]) >= sizeof(g_from_address),
+               "NFT values do not fit the contract argument buffers");
+_Static_assert(ADDRESS_SIZE == ADDRESS_LENGTH, "calldata addresses are full account addresses");
 static nbgl_contentTagValue_t pairs[MAX_REVIEW_PAIRS];
 static nbgl_contentTagValueList_t pairList;
 
@@ -80,6 +89,23 @@ static const approval_titles_t APPROVAL_TITLES[] = {
     [APPROVAL_LIMITED] = {"Approve token spending", "Approve token\nspending"},
     [APPROVAL_REVOKE] = {"Revoke token approval", "Revoke token\napproval"},
     [APPROVAL_UNLIMITED] = {"Approve unlimited spending", "Approve unlimited\nspending"},
+#endif
+};
+
+enum { NFT_SEND, NFT_APPROVE, NFT_REVOKE, NFT_APPROVE_ALL, NFT_REVOKE_ALL };
+static const approval_titles_t NFT_TITLES[] = {
+#ifdef TOKEN_METADATA_TEST_KEY
+    [NFT_SEND] = {"TEST NFT transfer", "Send NFT"},
+    [NFT_APPROVE] = {"TEST NFT approval", "Approve NFT"},
+    [NFT_REVOKE] = {"TEST revoke NFT approval", "Revoke NFT\napproval"},
+    [NFT_APPROVE_ALL] = {"TEST approve NFT collection", "Approve entire\nNFT collection"},
+    [NFT_REVOKE_ALL] = {"TEST revoke NFT collection", "Revoke NFT\ncollection approval"},
+#else
+    [NFT_SEND] = {"Send NFT", "Send NFT"},
+    [NFT_APPROVE] = {"Approve NFT", "Approve NFT"},
+    [NFT_REVOKE] = {"Revoke NFT approval", "Revoke NFT\napproval"},
+    [NFT_APPROVE_ALL] = {"Approve entire NFT collection", "Approve entire\nNFT collection"},
+    [NFT_REVOKE_ALL] = {"Revoke NFT collection approval", "Revoke NFT\ncollection approval"},
 #endif
 };
 
@@ -164,6 +190,15 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     const bool is_approval = token->kind == TOKEN_CALL_APPROVE;
     const bool is_unlimited = token_call_is_unlimited_approval(token);
     const bool is_revocation = token_call_is_approval_revocation(token);
+    const nft_call_t *nft = &G_context.tx_info.nft_call;
+    const nft_metadata_t *collection = &G_context.tx_info.nft_metadata;
+    const bool is_nft = nft->kind != NFT_CALL_NONE;
+    const bool is_nft_transfer = nft->kind == NFT_CALL_TRANSFER;
+    // Clearing a single approval names no spender; revoking an operator still does.
+    const bool is_nft_revocation = nft_call_is_approval_revocation(nft);
+    if (is_nft && (is_blind_signed || is_token || is_contract || !collection->verified)) {
+        return abort_display(SW_BAD_STATE);
+    }
     const char *review_title = "Review transaction\n";
 #ifdef SCREEN_SIZE_WALLET
     const char *confirmation_title = "Sign transaction\n";
@@ -184,6 +219,16 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
 #else
         review_title = "Send tokens";
 #endif
+    }
+
+    if (is_nft) {
+        size_t mode = NFT_SEND;
+        if (nft->kind == NFT_CALL_APPROVE)
+            mode = is_nft_revocation ? NFT_REVOKE : NFT_APPROVE;
+        else if (nft->kind == NFT_CALL_APPROVE_ALL)
+            mode = nft->approved ? NFT_APPROVE_ALL : NFT_REVOKE_ALL;
+        review_title = PIC(NFT_TITLES[mode].review);
+        confirmation_title = PIC(NFT_TITLES[mode].confirmation);
     }
 
     if (is_contract) {
@@ -239,12 +284,12 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
 
     // An empty recipient creates a contract; it is not the zero address.
     memset(g_to_address, 0, sizeof(g_to_address));
-    if (!is_contract_creation && !format_checksummed_address(is_token ? token->target : tx->to,
-                                                             g_to_address,
-                                                             sizeof(g_to_address))) {
+    const uint8_t *to = is_token ? token->target : is_nft ? nft->target : tx->to;
+    if (!is_contract_creation &&
+        !format_checksummed_address(to, g_to_address, sizeof(g_to_address))) {
         return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
-    if (is_token &&
+    if ((is_token || is_nft) &&
         !format_checksummed_address(tx->to, g_token_contract, sizeof(g_token_contract))) {
         return abort_display(SW_DISPLAY_ADDRESS_FAIL);
     }
@@ -282,12 +327,51 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         pairs[count].item = (label);            \
         pairs[count++].value = (text);          \
     } while (0)
-    ADD_PAIR(is_approval ? "Owner" : "From", g_from_address);
-    ADD_PAIR(is_approval ? "Spending limit" : "Amount", g_amount);
-    if (is_contract_creation) {
-        ADD_PAIR("Operation", "Create contract");
+    if (is_nft) {
+        ADD_PAIR(is_nft_transfer ? "From" : "Owner", g_from_address);
+        // An approved operator may move a token it does not hold itself.
+        if (is_nft_transfer && memcmp(nft->owner, G_context.address, ADDRESS_SIZE) != 0) {
+            if (!format_checksummed_address(nft->owner,
+                                            g_contract_values[NFT_VALUE_OWNER],
+                                            sizeof(g_contract_values[NFT_VALUE_OWNER])))
+                return abort_display(SW_DISPLAY_ADDRESS_FAIL);
+            ADD_PAIR("NFT owner", g_contract_values[NFT_VALUE_OWNER]);
+        }
+        if (is_nft_transfer) {
+            ADD_PAIR("To", g_to_address);
+        } else if (nft->kind == NFT_CALL_APPROVE_ALL) {
+            ADD_PAIR("Operator", g_to_address);
+        } else if (!is_nft_revocation) {
+            ADD_PAIR("Spender", g_to_address);
+        }
+        ADD_PAIR("Collection", collection->name);
+        ADD_PAIR("NFT contract", g_token_contract);
+        if (nft->kind != NFT_CALL_APPROVE_ALL) {
+            if (!uint8_array_to_decimal(nft->token_id,
+                                        sizeof(nft->token_id),
+                                        g_contract_values[NFT_VALUE_TOKEN_ID],
+                                        sizeof(g_contract_values[NFT_VALUE_TOKEN_ID])))
+                return abort_display(SW_DISPLAY_AMOUNT_FAIL);
+            ADD_PAIR("Token ID", g_contract_values[NFT_VALUE_TOKEN_ID]);
+        } else if (nft->approved) {
+            ADD_PAIR("Access", "All NFTs in collection");
+        }
+        if (nft->has_quantity) {
+            if (!uint8_array_to_decimal(nft->quantity,
+                                        sizeof(nft->quantity),
+                                        g_contract_values[NFT_VALUE_QUANTITY],
+                                        sizeof(g_contract_values[NFT_VALUE_QUANTITY])))
+                return abort_display(SW_DISPLAY_AMOUNT_FAIL);
+            ADD_PAIR("Quantity", g_contract_values[NFT_VALUE_QUANTITY]);
+        }
     } else {
-        ADD_PAIR(is_approval ? "Spender" : "To", g_to_address);
+        ADD_PAIR(is_approval ? "Owner" : "From", g_from_address);
+        ADD_PAIR(is_approval ? "Spending limit" : "Amount", g_amount);
+        if (is_contract_creation) {
+            ADD_PAIR("Operation", "Create contract");
+        } else {
+            ADD_PAIR(is_approval ? "Spender" : "To", g_to_address);
+        }
     }
     if (is_token) {
         ADD_PAIR("Token contract", g_token_contract);

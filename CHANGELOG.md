@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- NFT transfers and approvals are clear-signed with the collection name when the host provides issuer-signed collection metadata through the new `PROVIDE_NFT_METADATA` command (`INS 0x0C`); see `doc/TRANSACTION.md`
+
 ### Changed
 
 - The transaction is parsed and Keccak-hashed chunk by chunk as the SIGN_TX APDUs arrive (`src/tx_stream.c`) instead of being buffered and decoded at the end. The fixed 510-byte transaction limit is gone (only a 64 KiB sanity cap remains), so transactions with large calldata can be signed

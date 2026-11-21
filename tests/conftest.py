@@ -5,6 +5,8 @@ from application_client.boilerplate_command_sender import Errors
 from application_client.token_calls import start, provide
 from application_client.token_metadata import make_test_metadata
 from application_client.contract_calls import make_test_descriptor
+from application_client.nft_metadata import make_test_nft_metadata
+from application_client.boilerplate_command_sender import CLA, InsType
 
 ###########################
 ### CONFIGURATION START ###
@@ -56,4 +58,19 @@ def contract_issuer(backend, request):
             if request.config.getoption("--contract-descriptor-test-key"):
                 pytest.fail("No contract issuer configured; expected DEBUG=1 CONTRACT_DESCRIPTOR_TEST_KEY=1")
             pytest.skip("Requires DEBUG=1 CONTRACT_DESCRIPTOR_TEST_KEY=1")
+        raise
+
+
+@pytest.fixture
+def nft_issuer(backend, request):
+    """NFT metadata is attested by the token metadata issuer under its own domain."""
+    start(backend)
+    try:
+        backend.exchange(cla=CLA, ins=InsType.PROVIDE_NFT_METADATA, p1=0, p2=0,
+                         data=make_test_nft_metadata())
+    except ExceptionRAPDU as exc:
+        if exc.status == Errors.SW_TOKEN_METADATA_NO_ISSUER:
+            if request.config.getoption("--token-metadata-test-key"):
+                pytest.fail("No token metadata issuer configured; expected DEBUG=1 TOKEN_METADATA_TEST_KEY=1")
+            pytest.skip("Requires a build with DEBUG=1 TOKEN_METADATA_TEST_KEY=1")
         raise

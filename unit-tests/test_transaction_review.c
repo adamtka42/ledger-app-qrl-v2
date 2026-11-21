@@ -42,15 +42,17 @@ static uint16_t response;
 static bool spinner, status_success;
 static const char *status_text;
 static void (*review_callback)(bool);
+static const char *review_title, *review_finish;
+static const nbgl_contentTagValueList_t *review_pairs;
 static void (*status_callback)(void);
 
 static bool fail_at(fault_t operation) {
     return fault == operation && ++fault_calls == fault_at;
 }
 
+/* Redirect persistent storage to the test copy; constants need no relocation here. */
 void *test_pic(const void *address) {
-    assert_ptr_equal(address, &N_storage_real);
-    return &storage;
+    return address == (const void *) &N_storage_real ? (void *) &storage : (void *) address;
 }
 
 void nvm_write(void *destination, const void *source, size_t length) {
@@ -86,11 +88,13 @@ void nbgl_useCaseReview(int type,
                         const char *finish,
                         void (*choice)(bool)) {
     (void) icon;
-    (void) title;
     (void) subtitle;
-    (void) finish;
+    review_title = title;
+    review_finish = finish;
+    review_pairs = pairs;
     assert_int_equal(type, TYPE_TRANSACTION);
-    assert_int_equal(pairs->nbPairs, G_context.tx_info.contract_call ? 13 : 9);
+    if (G_context.tx_info.nft_call.kind == NFT_CALL_NONE)
+        assert_int_equal(pairs->nbPairs, G_context.tx_info.contract_call ? 13 : 9);
     if (G_context.tx_info.contract_call) {
         assert_string_equal(title, "Review contract call");
         assert_string_equal(finish, "Sign contract call");
@@ -391,6 +395,142 @@ static void test_contract_review_capacity_and_validation(void **state) {
     }
 }
 
+static void start_nft_session(nft_call_kind_e kind) {
+    start_session(NO_FAULT, 0);
+    zond_tx_t *tx = &G_context.tx_info.tx_data;
+    tx->value_len = 0;
+    tx->has_data = true;
+    nft_metadata_t *collection = &G_context.tx_info.nft_metadata;
+    collection->verified = true;
+    strcpy(collection->name, "Quantum Cats");
+    nft_call_t *call = &G_context.tx_info.nft_call;
+    call->kind = kind;
+    memset(call->owner, 0x11, ADDRESS_LENGTH);  // the signer derived by the mock
+    memset(call->target, 0x33, ADDRESS_LENGTH);
+    call->token_id[MAX_FIELD_SIZE - 1] = 42;
+}
+
+static void assert_pair(size_t index, const char *item, const char *value) {
+    assert_true(index < review_pairs->nbPairs);
+    assert_string_equal(review_pairs->pairs[index].item, item);
+    if (value != NULL) assert_string_equal(review_pairs->pairs[index].value, value);
+}
+
+static void test_nft_transfer_review(void **state) {
+    (void) state;
+    zond_tx_t *tx = &G_context.tx_info.tx_data;
+
+    start_nft_session(NFT_CALL_TRANSFER);
+    ui_display_transaction_bs_choice(false, tx);
+    assert_int_equal(review_calls, 1);
+    assert_string_equal(review_title, "Send NFT");
+    assert_string_equal(review_finish, "Send NFT");
+    assert_int_equal(review_pairs->nbPairs, 11);
+    assert_pair(0, "From", NULL);
+    assert_pair(1, "To", NULL);
+    assert_int_equal(review_pairs->pairs[1].value[1], '3');
+    assert_pair(2, "Collection", "Quantum Cats");
+    assert_pair(3, "NFT contract", NULL);
+    assert_int_equal(review_pairs->pairs[3].value[1], '2');
+    assert_pair(4, "Token ID", "42");
+    assert_pair(5, "Chain ID", "1");
+
+    // An operator moving someone else's tokens, with a quantity: the largest review.
+    start_nft_session(NFT_CALL_TRANSFER);
+    nft_call_t *call = &G_context.tx_info.nft_call;
+    memset(call->owner, 0x44, ADDRESS_LENGTH);
+    memset(call->token_id, 0xff, MAX_FIELD_SIZE);
+    call->has_quantity = true;
+    call->quantity[MAX_FIELD_SIZE - 1] = 5;
+    ui_display_transaction_bs_choice(false, tx);
+    assert_int_equal(review_calls, 1);
+    assert_int_equal(review_pairs->nbPairs, 13);
+    assert_pair(0, "From", NULL);
+    assert_pair(1, "NFT owner", NULL);
+    assert_int_equal(review_pairs->pairs[1].value[1], '4');
+    assert_pair(2, "To", NULL);
+    assert_pair(5,
+                "Token ID",
+                "115792089237316195423570985008687907853269984665640564039457584007913129639935");
+    assert_pair(6, "Quantity", "5");
+    assert_pair(12, "Transaction hash", NULL);
+}
+
+static void test_nft_approval_reviews(void **state) {
+    (void) state;
+    zond_tx_t *tx = &G_context.tx_info.tx_data;
+
+    start_nft_session(NFT_CALL_APPROVE);
+    ui_display_transaction_bs_choice(false, tx);
+    assert_string_equal(review_title, "Approve NFT");
+    assert_int_equal(review_pairs->nbPairs, 11);
+    assert_pair(0, "Owner", NULL);
+    assert_pair(1, "Spender", NULL);
+    assert_pair(2, "Collection", "Quantum Cats");
+    assert_pair(4, "Token ID", "42");
+
+    start_nft_session(NFT_CALL_APPROVE);
+    memset(G_context.tx_info.nft_call.target, 0, ADDRESS_LENGTH);
+    ui_display_transaction_bs_choice(false, tx);
+    assert_string_equal(review_title, "Revoke NFT approval");
+    assert_int_equal(review_pairs->nbPairs, 10);
+    assert_pair(0, "Owner", NULL);
+    assert_pair(1, "Collection", "Quantum Cats");
+    assert_pair(3, "Token ID", "42");
+
+    start_nft_session(NFT_CALL_APPROVE_ALL);
+    G_context.tx_info.nft_call.approved = true;
+    ui_display_transaction_bs_choice(false, tx);
+    assert_string_equal(review_title, "Approve entire NFT collection");
+    assert_int_equal(review_pairs->nbPairs, 11);
+    assert_pair(1, "Operator", NULL);
+    assert_pair(4, "Access", "All NFTs in collection");
+
+    start_nft_session(NFT_CALL_APPROVE_ALL);
+    ui_display_transaction_bs_choice(false, tx);
+    assert_string_equal(review_title, "Revoke NFT collection approval");
+    assert_int_equal(review_pairs->nbPairs, 10);
+    assert_pair(1, "Operator", NULL);
+    assert_pair(4, "Chain ID", "1");
+}
+
+static void test_nft_review_requires_consistent_session(void **state) {
+    (void) state;
+    zond_tx_t *tx = &G_context.tx_info.tx_data;
+    for (int mutation = 0; mutation < 4; mutation++) {
+        start_nft_session(NFT_CALL_TRANSFER);
+        if (mutation == 0) G_context.tx_info.nft_metadata.verified = false;
+        if (mutation == 1) G_context.tx_info.token_call.kind = TOKEN_CALL_TRANSFER;
+        if (mutation == 2) G_context.tx_info.contract_call = true;
+        ui_display_transaction_bs_choice(mutation == 3, tx);
+        assert_discarded(SW_BAD_STATE);
+        assert_int_equal(menu_calls, 1);
+        assert_int_equal(review_calls, 0);
+    }
+    // A failure while formatting NFT fields never leaves a review on screen.
+    const struct {
+        fault_t operation;
+        unsigned occurrence;
+        uint16_t status;
+    } faults[] = {
+        {ADDRESS_FAIL, 3, SW_DISPLAY_ADDRESS_FAIL},  // NFT contract
+        {ADDRESS_FAIL, 4, SW_DISPLAY_ADDRESS_FAIL},  // NFT owner
+        {DECIMAL_FAIL, 3, SW_DISPLAY_AMOUNT_FAIL},   // token ID
+        {DECIMAL_FAIL, 4, SW_DISPLAY_AMOUNT_FAIL},   // quantity
+    };
+    for (size_t i = 0; i < sizeof(faults) / sizeof(faults[0]); i++) {
+        start_nft_session(NFT_CALL_TRANSFER);
+        memset(G_context.tx_info.nft_call.owner, 0x44, ADDRESS_LENGTH);
+        G_context.tx_info.nft_call.has_quantity = true;
+        G_context.tx_info.nft_call.quantity[0] = 1;
+        fault = faults[i].operation;
+        fault_at = faults[i].occurrence;
+        ui_display_transaction_bs_choice(false, tx);
+        assert_discarded(faults[i].status);
+        assert_int_equal(review_calls, 0);
+    }
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_preparation_failure_returns_home),
@@ -398,6 +538,9 @@ int main(void) {
         cmocka_unit_test(test_review_status_matches_signature_result),
         cmocka_unit_test(test_rejection_status),
         cmocka_unit_test(test_contract_review_capacity_and_validation),
+        cmocka_unit_test(test_nft_transfer_review),
+        cmocka_unit_test(test_nft_approval_reviews),
+        cmocka_unit_test(test_nft_review_requires_consistent_session),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
