@@ -464,7 +464,7 @@ static void test_nft_approval_reviews(void **state) {
     ui_display_transaction_bs_choice(false, tx);
     assert_string_equal(review_title, "Approve NFT");
     assert_int_equal(review_pairs->nbPairs, 11);
-    assert_pair(0, "Owner", NULL);
+    assert_pair(0, "From", NULL);  // an approved operator may sign this too
     assert_pair(1, "Spender", NULL);
     assert_pair(2, "Collection", "Quantum Cats");
     assert_pair(4, "Token ID", "42");
@@ -474,7 +474,7 @@ static void test_nft_approval_reviews(void **state) {
     ui_display_transaction_bs_choice(false, tx);
     assert_string_equal(review_title, "Revoke NFT approval");
     assert_int_equal(review_pairs->nbPairs, 10);
-    assert_pair(0, "Owner", NULL);
+    assert_pair(0, "From", NULL);
     assert_pair(1, "Collection", "Quantum Cats");
     assert_pair(3, "Token ID", "42");
 
@@ -483,6 +483,7 @@ static void test_nft_approval_reviews(void **state) {
     ui_display_transaction_bs_choice(false, tx);
     assert_string_equal(review_title, "Approve entire NFT collection");
     assert_int_equal(review_pairs->nbPairs, 11);
+    assert_pair(0, "Owner", NULL);
     assert_pair(1, "Operator", NULL);
     assert_pair(4, "Access", "All NFTs in collection");
 
@@ -490,6 +491,7 @@ static void test_nft_approval_reviews(void **state) {
     ui_display_transaction_bs_choice(false, tx);
     assert_string_equal(review_title, "Revoke NFT collection approval");
     assert_int_equal(review_pairs->nbPairs, 10);
+    assert_pair(0, "Owner", NULL);
     assert_pair(1, "Operator", NULL);
     assert_pair(4, "Chain ID", "1");
 }

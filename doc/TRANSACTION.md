@@ -68,9 +68,10 @@ signature over SHA-256("QRL-NFT-METADATA-V1" || everything before the signature)
 
 The name is ASCII letters and digits, with single ` `, `.`, `-` or `_`
 separators between them. The command answers `6A80` for a malformed payload,
-`6982` for a signature the issuer did not make, `6A88` when the build has no
-issuer, and `B007` outside that point of a signing session. Token metadata, NFT
-metadata and a contract descriptor are mutually exclusive within one transaction.
+including a zero chain ID or contract, `6982` for a signature the issuer did not
+make, `6A88` when the build has no issuer, `6A86` for a non-zero P1 or P2, and
+`B007` outside that point of a signing session. Token metadata, NFT metadata and
+a contract descriptor are mutually exclusive within one transaction.
 
 The transaction is then clear-signed only if it is sent to that contract on
 that chain, carries no value and no access list, and its calldata is exactly
@@ -85,10 +86,12 @@ one of the calls below, with canonical 64-byte argument words:
 | `approve(address,uint256)` | Approve NFT: Spender, Token ID. A zero spender is shown as a revocation |
 | `setApprovalForAll(address,bool)` | Approve or revoke an Operator for the entire collection |
 
+The signing account is shown as `From` for a transfer and for `approve`, because
+an approved operator may sign either, and as `Owner` for `setApprovalForAll`.
 When the `from` argument of a transfer is not the signing account, it is shown
 as `NFT owner`. Anything else sent to the collection, including a transfer with
-attached data or a batch transfer, is not described by the metadata and falls
-back to the blind-signing rules above.
+attached data, a batch transfer, a zero quantity or a zero operator, is not
+described by the metadata and falls back to the blind-signing rules above.
 
 ## Signature
 

@@ -273,8 +273,9 @@ change the established transfer policy or simulate contract execution.
 
 Other calls, mismatching descriptors, noncanonical token arguments, native
 value, or nonempty access lists follow the existing blind-signing policy; with
-blind signing disabled they are rejected. `transferFrom`, NFT calls,
-routers, and general ABI decoding are outside this version's supported profile.
+blind signing disabled they are rejected. Token `transferFrom`, routers, and
+general ABI decoding are outside this version's supported profile. NFT
+collections have their own metadata and profile; see PROVIDE NFT METADATA.
 
 Descriptors exist only in RAM for one signing session. `DATA_FIRST`, address
 requests, and aborted sessions invalidate them; none are persisted to NVM or
@@ -293,6 +294,48 @@ tests/venv/bin/python examples/token_call.py --test-key --operation approve --un
 
 Use `--url` for the emulator API endpoint and `--spender Q...` to change the
 authorized spender. The metadata APDU and session ordering remain unchanged.
+
+### PROVIDE NFT METADATA
+
+Accepts one authenticated NFT collection descriptor for the current transaction
+session, at the same point as token metadata: **after** `SIGN_TX/DATA_FIRST` and
+**before** any transaction bytes.
+
+| CLA | INS | P1 | P2 | Lc |
+| --- | --- | --- | --- | --- |
+| E0 | 0D | 00 | 00 | variable |
+
+| Payload field | Bytes | Encoding |
+| --- | --- | --- |
+| Version | 1 | `01` |
+| Chain ID | 32 | Unsigned big-endian, left-padded with zeros; nonzero |
+| NFT contract | 64 | Raw QRL address bytes, without textual `Q`; nonzero |
+| Name length | 1 | `1` through `32` |
+| Name | variable | ASCII letters and digits, with single ` `, `.`, `-` or `_` separators between them |
+| Signature | 8–72 | DER ECDSA P-256 signature |
+
+The token metadata issuer signs `SHA256(ASCII("QRL-NFT-METADATA-V1") || body)`,
+where `body` contains every field from Version through Name. The separate domain
+means a token metadata signature is never accepted here, nor the reverse.
+
+| SW | Meaning |
+| --- | --- |
+| `6A80` | Malformed payload, including a zero Chain ID or contract and an unsupported name |
+| `6982` | The signature was not made by the configured issuer |
+| `6A88` | The build has no issuer |
+| `6A86` | P1 or P2 is not zero |
+| `B007` | Not at that point of a signing session, or token metadata or a contract descriptor was already accepted |
+
+Each of these aborts the signing session. Token metadata, NFT metadata and a
+contract descriptor are mutually exclusive within one transaction.
+
+Issuers must attest only SQRCTN1- or SQRCTB1-compatible collections. A fungible
+token has the same `approve(address,uint256)` selector, but there the integer is
+a spending limit and not a token ID; the device cannot tell them apart from
+calldata.
+
+The supported calls, their review rows and the cases that fall back to blind
+signing are listed in `doc/TRANSACTION.md`.
 
 ## Status Words
 

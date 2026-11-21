@@ -335,6 +335,27 @@ static void test_metadata_parse(void **state) {
         }
         assert_false(nft_metadata_parse(data, len, &parsed, &body_len));
     }
+
+    /* Inside a name only letters, digits and the four separators are accepted. */
+    for (unsigned c = 0; c < 256; c++) {
+        const bool allowed = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                             (c >= '0' && c <= '9') || c == ' ' || c == '.' || c == '-' ||
+                             c == '_';
+        len = payload(data, "A?B");
+        data[NFT_METADATA_FIXED_LEN + 1] = (uint8_t) c;
+        assert_int_equal(nft_metadata_parse(data, len, &parsed, &body_len), allowed);
+    }
+
+    /* The signature is one DER sequence of 8 to 72 bytes. */
+    for (size_t sig_len = 6; sig_len <= 74; sig_len++) {
+        len = payload(data, "Quantum Cats") - 8;
+        memset(data + len, 0, sig_len);
+        data[len] = 0x30;
+        data[len + 1] = (uint8_t) (sig_len - 2);
+        assert_int_equal(nft_metadata_parse(data, len + sig_len, &parsed, &body_len),
+                         sig_len >= 8 && sig_len <= 72);
+    }
+
     assert_false(nft_metadata_parse(NULL, 100, &parsed, &body_len));
     assert_false(nft_metadata_parse(data, len, NULL, &body_len));
     assert_false(nft_metadata_parse(data, len, &parsed, NULL));
