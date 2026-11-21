@@ -147,8 +147,8 @@ static void test_deadline_format(void **state) {
         {4107542400, "2100-03-01 00:00:00 UTC"},
         {4294967296, "2106-02-07 06:28:16 UTC"},
         {253402300799, "9999-12-31 23:59:59 UTC"},
-        {253402300800, "No expiry date"},
-        {UINT64_MAX, "No expiry date"},
+        {253402300800, "After year 9999"},
+        {UINT64_MAX, "After year 9999"},
     };
     char text[PERMIT_DEADLINE_MAX_LEN];
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -161,10 +161,10 @@ static void test_deadline_format(void **state) {
     uint8_t word[64] = {0};
     word[0] = 1;
     assert_true(permit_format_deadline(word, text, sizeof(text)));
-    assert_string_equal(text, "No expiry date");
+    assert_string_equal(text, "After year 9999");
     memset(word, 0xff, sizeof(word));
     assert_true(permit_format_deadline(word, text, sizeof(text)));
-    assert_string_equal(text, "No expiry date");
+    assert_string_equal(text, "After year 9999");
     assert_false(permit_format_deadline(word, text, sizeof(text) - 1));
     assert_false(permit_format_deadline(NULL, text, sizeof(text)));
     assert_false(permit_format_deadline(word, NULL, sizeof(text)));
@@ -195,7 +195,7 @@ static void test_permit_rows(void **state) {
         {"Token owner", owner},
         {"Spending limit", "TKN 25"},
         {"Spender", spender},
-        {"Token contract", contract},
+        {"Contract", contract},  // "Token contract" on touch screens
         {"Chain ID", "1"},
         {"Valid until", "2033-05-18 03:33:20 UTC"},
         {"Permit nonce", "7"},
@@ -226,7 +226,7 @@ static void test_permit_kinds(void **state) {
     assert_true(permit_prepare(&data, &metadata));
     assert_int_equal(data.permit_kind, PERMIT_UNLIMITED);
     assert_string_equal(value(1), "TKN Unlimited");
-    assert_string_equal(value(5), "No expiry date");
+    assert_string_equal(value(5), "After year 9999");
 
     /* One unit below the maximum is an ordinary, exactly displayed limit. */
     c.value[31] = 0xfe;
@@ -283,6 +283,22 @@ static void test_other_messages_keep_generic_review(void **state) {
     assert_generic(&c, &metadata);
     c = STANDARD;
     c.primary = "permit";
+    assert_generic(&c, &metadata);
+    /* A name that only extends or shortens the expected one is another name. */
+    c = STANDARD;
+    c.primary = "Permit2";
+    assert_generic(&c, &metadata);
+    c = STANDARD;
+    c.primary = "Permi";
+    assert_generic(&c, &metadata);
+    c = STANDARD;
+    c.field_names[0] = "owner2";
+    assert_generic(&c, &metadata);
+    c = STANDARD;
+    c.field_names[4] = "deadlin";
+    assert_generic(&c, &metadata);
+    c = STANDARD;
+    c.field_types[3] = "uint";
     assert_generic(&c, &metadata);
     c = STANDARD;
     c.field_names[2] = "nonce";

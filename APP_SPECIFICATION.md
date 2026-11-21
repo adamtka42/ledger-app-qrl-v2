@@ -380,9 +380,9 @@ deadline and the permit nonce:
 | Token owner | Shown only when `owner` is not the signing account |
 | Spending limit | `<symbol> <amount>`; `<symbol> Unlimited` for `2^256 - 1` |
 | Spender | `spender` |
-| Token contract | `verifyingContract` |
+| Token contract | `verifyingContract`; the row is titled `Contract` on Nano |
 | Chain ID | `chainId` |
-| Valid until | `deadline` as `YYYY-MM-DD HH:MM:SS UTC`; `No expiry date` after year 9999 |
+| Valid until | `deadline` as `YYYY-MM-DD HH:MM:SS UTC`; `After year 9999` for any later value |
 | Permit nonce | `nonce` |
 
 A zero limit is titled as a permit revocation and the maximum as an unlimited

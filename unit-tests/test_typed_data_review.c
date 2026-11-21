@@ -423,7 +423,11 @@ static void test_permit_review(void **state) {
         next += rows;
         memset(address, 0x22, sizeof(address));
         assert_true(format_checksummed_address(address, expected, sizeof(expected)));
+#ifdef SCREEN_SIZE_WALLET
         rows = joined_value(next, "Token contract", text, sizeof(text));
+#else
+        rows = joined_value(next, "Contract", text, sizeof(text));  // fits a Nano title
+#endif
         assert_true(rows > 0);
         assert_string_equal(text, expected);
         next += rows;

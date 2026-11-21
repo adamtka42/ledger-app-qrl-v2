@@ -16,7 +16,7 @@ typedef enum {
     PERMIT_UNLIMITED,
 } permit_kind_e;
 
-/* Deadlines after 9999-12-31 23:59:59 UTC are shown as having no expiry. */
+/* Deadlines after 9999-12-31 23:59:59 UTC are shown as "After year 9999". */
 #define PERMIT_DEADLINE_MAX_LEN sizeof("9999-12-31 23:59:59 UTC")
 
 /* Format a uint256 deadline word (Unix seconds) for review. */

@@ -18,6 +18,14 @@ static const char FIELD_TYPES[FIELD_COUNT][8] = {"address",
                                                  "uint256",
                                                  "uint256"};
 
+/* Nano cuts the middle out of a title that is slightly too wide, and
+ * "Token contract" becomes one once a page counter is appended. */
+#ifdef SCREEN_SIZE_WALLET
+#define CONTRACT_LABEL "Token contract"
+#else
+#define CONTRACT_LABEL "Contract"
+#endif
+
 static bool span_is(const typed_data_t *data, typed_span_t span, const char *text) {
     return span.length == strlen(text) &&
            memcmp(data->payload + span.offset, text, span.length) == 0;
@@ -72,7 +80,8 @@ static void two_digits(char *out, unsigned value) {
 }
 
 bool permit_format_deadline(const uint8_t word[ABI_WORD_LEN], char *out, size_t size) {
-    static const char never[] = "No expiry date";
+    /* Still a finite deadline, so it is not presented as an unlimited one. */
+    static const char never[] = "After year 9999";
     /* 9999-12-31 23:59:59 UTC is 253402300799 = 0x3AFFF4417F. */
     static const uint8_t last[5] = {0x3a, 0xff, 0xf4, 0x41, 0x7f};
     if (word == NULL || out == NULL || size < PERMIT_DEADLINE_MAX_LEN) return false;
@@ -178,7 +187,7 @@ bool permit_prepare(typed_data_t *data, const token_metadata_t *metadata) {
     data->permit_owner_pairs = data->pair_count;
     if (!typed_data_review_add(data, "Spending limit", limit) ||
         !typed_data_review_add(data, "Spender", spender) ||
-        !typed_data_review_add(data, "Token contract", contract) ||
+        !typed_data_review_add(data, CONTRACT_LABEL, contract) ||
         !typed_data_review_add(data, "Chain ID", chain_id) ||
         !typed_data_review_add(data, "Valid until", deadline) ||
         !typed_data_review_add(data, "Permit nonce", nonce))
