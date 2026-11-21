@@ -20,7 +20,10 @@ The vulnerable input file created can be passed as an argument to the fuzzer to 
 `fuzz_typed_data.c` covers typed-data schema/value validation, hashing and review
 preparation. It compares a complete payload with the same payload fed in chunks,
 checks accepted review offsets and string bounds, and exercises both whole values
-and bounded fragments. The first byte controls chunk size and pagination; the
+and bounded fragments. Accepted messages are also offered to the token permit
+review with metadata naming their own domain, checking that a permit replaces
+the review consistently and anything else leaves it untouched. The first byte
+controls chunk size, pagination and whether that metadata is authenticated; the
 remaining bytes contain up to 4096 bytes of wire data. It uses real SDK-free hash
 and address code; NBGL and signing are covered separately by device tests.
 
@@ -61,8 +64,9 @@ make -C /tmp/fuzz-build
 /tmp/fuzz-build/fuzz_tx_parser -max_total_time=60 -max_len=8192 /app/fuzzing/corpus
 ```
 
-To fuzz typed data, generate a corpus from the nine existing go-qrl vectors
-(four chunk/pagination settings per vector), then run:
+To fuzz typed data, generate a corpus from the typed-data fixtures (the go-qrl
+vectors and the token permit examples, four chunk/pagination settings each),
+then run:
 
 ```console
 python3 /app/fuzzing/generate_typed_data_corpus.py /tmp/typed-data-corpus

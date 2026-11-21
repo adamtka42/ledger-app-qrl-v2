@@ -355,6 +355,47 @@ text/bytes include their byte length. All fragments are regular review pages.
 Definitions and domain names originate from the host; review does not attest a
 dApp's identity or enforce the permissions described by a message.
 
+#### Token spending permits
+
+A permit is typed data with the effect of a token `approve`: whoever holds the
+signature can set the allowance without the owner sending a transaction. The
+device clear-signs it like a token approval when all of the following hold:
+
+- the host sent issuer-signed token metadata with `PROVIDE_TOKEN_METADATA`
+  (`INS=0A`) after the first `SIGN_TYPED_DATA` command and before any payload
+  fragment (see below);
+- the schema has exactly two types, and the primary type is exactly
+  `Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)`,
+  with these names, types and order;
+- the domain contains `chainId` and `verifyingContract`, no `salt`, and both
+  equal the Chain ID and token contract of the verified metadata.
+
+The review then shows the signing account, the spending limit with the token's
+symbol and decimals, the spender, the token contract, the Chain ID, the
+deadline and the permit nonce:
+
+| Row | Content |
+| --- | --- |
+| Sign with | Signing account |
+| Token owner | Shown only when `owner` is not the signing account |
+| Spending limit | `<symbol> <amount>`; `<symbol> Unlimited` for `2^256 - 1` |
+| Spender | `spender` |
+| Token contract | `verifyingContract` |
+| Chain ID | `chainId` |
+| Valid until | `deadline` as `YYYY-MM-DD HH:MM:SS UTC`; `No expiry date` after year 9999 |
+| Permit nonce | `nonce` |
+
+A zero limit is titled as a permit revocation and the maximum as an unlimited
+spending permit. The domain's `name` and `version` are part of the signed hash
+but are not shown: the token is identified by the issuer-signed symbol and its
+contract. The device has no clock, so it cannot tell whether a deadline has
+passed. The signed digest is the same as for the generic review.
+
+Any other message, including a `Permit` with different fields, a different
+token or network, or one sent without metadata, keeps the generic review above
+and shows every raw field. Metadata that fails authentication aborts the
+session, as it does for transactions.
+
 #### Manual example
 
 With the typed-data app running in Speculos, use:
@@ -372,8 +413,10 @@ public signature verification data. The script verifies the signature locally.
 
 ### PROVIDE TOKEN METADATA
 
-Accepts one authenticated token descriptor for the current transaction session.
-It must be sent **after** `SIGN_TX/DATA_FIRST` and **before** any transaction bytes:
+Accepts one authenticated token descriptor for the current signing session:
+a transaction, or typed data carrying a token spending permit (send it after
+the first `SIGN_TYPED_DATA` command and before any payload fragment).
+For a transaction it must be sent **after** `SIGN_TX/DATA_FIRST` and **before** any transaction bytes:
 
 1. `SIGN_TX`, P1=`00`, P2=`00`: BIP32 path.
 2. `PROVIDE_TOKEN_METADATA`, CLA=`E0`, INS=`0A`, P1=`00`, P2=`00`: payload below.

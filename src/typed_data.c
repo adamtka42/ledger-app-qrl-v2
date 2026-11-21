@@ -302,6 +302,26 @@ static bool review_parts(typed_data_t *data, const char *label, char *text, size
     return true;
 }
 
+void typed_data_review_reset(typed_data_t *data) {
+    memset(data->review, 0, sizeof(data->review));
+    memset(data->pairs, 0, sizeof(data->pairs));
+    data->review_used = 0;
+    data->pair_count = 0;
+}
+
+bool typed_data_review_add(typed_data_t *data, const char *label, char *text) {
+    return data != NULL && label != NULL && text != NULL &&
+           review_parts(data, label, text, strlen(text));
+}
+
+bool typed_data_review_blob(typed_data_t *data,
+                            const uint8_t *bytes,
+                            size_t length,
+                            uint16_t *offset) {
+    return data != NULL && bytes != NULL && offset != NULL &&
+           store(data, (const char *) bytes, length, offset);
+}
+
 static void hex(const uint8_t *bytes, size_t length, char *out) {
     static const char digits[] = "0123456789abcdef";
     out[0] = '0';
@@ -403,6 +423,7 @@ static bool value_word(typed_data_t *data,
     }
     const uint8_t *bytes = take(data, length);
     if (bytes == NULL) return false;
+    data->value_offset[field - data->fields] = (uint16_t) (bytes - data->payload);
     char display[2 * TYPED_DATA_MAX_VALUE + 3];
     if (field->kind == TYPED_STRING) {
         size_t lines = 0;

@@ -108,12 +108,17 @@ target_compile_definitions(test_personal_message_review_nano PRIVATE TARGET_NANO
 target_link_libraries(test_personal_message_review_nano PRIVATE personal_message address_format hashes cmocka gcov)
 add_test(test_personal_message_review_nano test_personal_message_review_nano)
 
-add_library(typed_data ../src/typed_data.c)
+add_library(typed_data ../src/typed_data.c ../src/permit.c)
+target_link_libraries(typed_data PUBLIC tx_format address_format)
 add_executable(test_typed_data test_typed_data.c)
 target_compile_definitions(test_typed_data PRIVATE
     TYPED_DATA_VECTOR_FILE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/typed_data.txt")
 target_link_libraries(test_typed_data PUBLIC typed_data address_format hashes cmocka gcov)
 add_test(test_typed_data test_typed_data)
+
+add_executable(test_permit test_permit.c)
+target_link_libraries(test_permit PUBLIC typed_data address_format hashes cmocka gcov)
+add_test(test_permit test_permit)
 
 add_executable(test_typed_storage test_typed_storage.c ../src/typed_data_storage.c)
 target_include_directories(test_typed_storage BEFORE PRIVATE mocks)

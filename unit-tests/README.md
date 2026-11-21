@@ -61,6 +61,13 @@ It covers nested structs, arrays, 512-bit integers, empty/long values, all
 streaming split positions, truncation, trailing bytes and canonical values.
 `tests/test_typed_data_cmd.py` additionally checks UI, signatures, malformed
 schemas, review limits and isolation from transaction/personal-message sessions.
+`test_permit` covers token spending permits: deadline dates across leap years
+and the year-9999 limit, exact limits for every decimals setting, the revoke and
+unlimited cases, pagination of the rows, and every near-miss that must keep the
+generic review (other token or network, renamed/reordered/retyped fields, extra
+fields or types, a domain salt, a missing contract, unauthenticated metadata).
+The typed-data review tests check the permit titles and that the owner row
+appears only when the owner is not the signing account.
 `test_typed_storage` observes NVM writes and checks raw-payload erasure, review
 erasure, replacement/startup cleanup, and retry after interrupted erasure.
 

@@ -74,11 +74,17 @@ static int abort_metadata(uint16_t sw) {
 
 int handler_provide_token_metadata(const uint8_t *data, size_t len, uint8_t p1, uint8_t p2) {
     if (p1 != 0 || p2 != 0) return abort_metadata(SW_WRONG_P1P2);
-    if (G_context.req_type != CONFIRM_TRANSACTION || G_context.state != STATE_RECEIVING ||
-        G_context.tx_info.stream.total_len != 0)
-        return abort_metadata(SW_BAD_STATE);
+    /* Only a fresh signing session accepts metadata: a transaction before its
+     * first byte, or typed data (for token permits) before its first fragment. */
+    token_metadata_t *metadata = NULL;
+    if (G_context.state == STATE_RECEIVING) {
+        if (G_context.req_type == CONFIRM_TRANSACTION && G_context.tx_info.stream.total_len == 0)
+            metadata = &G_context.tx_info.token_metadata;
+        else if (G_context.req_type == CONFIRM_TYPED_DATA && G_context.typed_data.received_len == 0)
+            metadata = &G_context.typed_data.token_metadata;
+    }
+    if (metadata == NULL) return abort_metadata(SW_BAD_STATE);
 
-    token_metadata_t *metadata = &G_context.tx_info.token_metadata;
     size_t body_len;
     if (!token_metadata_parse(data, len, metadata, &body_len)) {
         return abort_metadata(SW_TOKEN_METADATA_INVALID);

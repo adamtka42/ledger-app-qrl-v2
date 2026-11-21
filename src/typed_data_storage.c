@@ -4,6 +4,7 @@
 
 #include "os_nvm.h"
 #include "os_pic.h"
+#include "permit.h"
 
 typedef struct {
     uint8_t active[64];
@@ -94,7 +95,8 @@ __attribute__((noinline)) bool typed_data_session_finish(typed_data_session_t *s
         !typed_data_name(&parsed,
                          parsed.types[parsed.primary_type].name,
                          session->primary_type,
-                         sizeof(session->primary_type)))
+                         sizeof(session->primary_type)) ||
+        !permit_prepare(&parsed, &session->token_metadata))
         goto cleanup;
     nvm_write((void *) N_typed.review, parsed.review, parsed.review_used);
     memcpy(session->digest, parsed.digest, sizeof(session->digest));
@@ -102,6 +104,9 @@ __attribute__((noinline)) bool typed_data_session_finish(typed_data_session_t *s
     session->pair_count = parsed.pair_count;
     session->has_chain_id = parsed.has_chain_id;
     session->has_verifying_contract = parsed.has_verifying_contract;
+    session->permit_kind = parsed.permit_kind;
+    session->permit_owner_pairs = parsed.permit_owner_pairs;
+    session->permit_owner = parsed.permit_owner;
     session->finished = true;
     result = true;
 cleanup:
