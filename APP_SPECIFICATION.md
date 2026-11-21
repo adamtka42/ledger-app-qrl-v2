@@ -168,6 +168,49 @@ None
 | ---                   | ---      |
 | Application name      | variable |
 
+### GET APP CONFIGURATION
+
+Read the current application settings and version before preparing a signing
+request. This command has no confirmation screen and does not change settings,
+derive keys, clear the current request, or revoke signature export. Settings
+remain controlled by the user through the device UI.
+
+| CLA | INS | P1 | P2 | Lc |
+| --- | --- | --- | --- | --- |
+| E0 | 0D | 00 | 00 | 00 |
+
+No input data. Nonzero P1/P2 returns `6A86`; nonzero Lc returns `6A87`.
+The response contains exactly five bytes, followed by `9000`:
+
+| Offset | Field | Meaning |
+| --- | --- | --- |
+| 0 | Format version | `01` for this response layout |
+| 1 | Settings flags | Bit 0: blind signing; bit 1: display nonce; bit 2: display transaction hash |
+| 2 | Major version | Same value as `GET_VERSION` |
+| 3 | Minor version | Same value as `GET_VERSION` |
+| 4 | Patch version | Same value as `GET_VERSION` |
+
+A set bit means enabled. Bits 3..7 are reserved and currently zero; clients must
+ignore unknown settings bits and reject unsupported format versions. These are
+live user settings, not a list of supported signing features. The existing
+`GET_VERSION` and `GET_APP_NAME` response formats remain unchanged. Older firmware
+without this command returns `6D00`; wallets can fall back to `GET_VERSION` and
+treat settings as unknown. As with other APDUs, the SDK may reject a query with
+`6901` while an on-device review is active; query before starting the review.
+
+For example, version 2.2.2 with all three settings disabled returns
+`01 00 02 02 02 90 00`. To query a running Speculos instance:
+
+```sh
+tests/venv/bin/python examples/app_configuration.py --url http://127.0.0.1:5003
+```
+
+The Python test client exposes `get_app_configuration()`; decode its response
+with `AppConfiguration.from_bytes(rapdu.data)`. Unit tests cover every flag
+combination and state preservation. `tests/test_app_configuration_cmd.py` checks
+settings changed through the real device UI, invalid requests, and interleaved
+queries during transaction streaming and signature export.
+
 ## Status Words
 
 The following standard Status Words are returned for all APDUs.

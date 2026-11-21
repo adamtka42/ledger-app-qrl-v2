@@ -29,6 +29,7 @@ class InsType(IntEnum):
     GET_APP_NAME   = 0x04
     GET_PUBLIC_KEY = 0x05
     SIGN_TX        = 0x06
+    GET_APP_CONFIGURATION = 0x0D
 
 class Errors(IntEnum):
     SW_DENY                    = 0x6985
@@ -76,6 +77,15 @@ class BoilerplateCommandSender:
                                      ins=InsType.GET_APP_NAME,
                                      p1=P1.P1_START,
                                      p2=P2.P2_LAST,
+                                     data=b"")
+
+
+    def get_app_configuration(self) -> RAPDU:
+        """Read current settings without changing the active request."""
+        return self.backend.exchange(cla=CLA,
+                                     ins=InsType.GET_APP_CONFIGURATION,
+                                     p1=0,
+                                     p2=0,
                                      data=b"")
 
 

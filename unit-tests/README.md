@@ -41,6 +41,12 @@ It checks that failed preparation clears the session and returns to the home
 screen, and that clear/blind reviews show a failure instead of a signed status
 when signing or self-verification fails.
 
+`test_app_configuration` exercises the real dispatcher and read-only handler
+with all eight combinations of settings, invalid APDU arguments, and every
+request state. It checks that the request and NVM remain unchanged and that
+`GET_VERSION` retains its response format. `test_app_configuration_client`
+checks the versioned Python decoder without an emulator or external packages.
+
 ## Generate code coverage
 
 Just execute in `unit-tests` folder
