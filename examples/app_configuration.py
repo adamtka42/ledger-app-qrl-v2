@@ -16,7 +16,7 @@ def main():
     args = parser.parse_args()
     request = urllib.request.Request(
         args.url.rstrip("/") + "/apdu",
-        data=json.dumps({"data": "e00d000000"}).encode(),
+        data=json.dumps({"data": "e00e000000"}).encode(),
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(request, timeout=10) as reply:

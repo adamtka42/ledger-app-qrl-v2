@@ -71,7 +71,7 @@ int handler_sign_tx(buffer_t *data, uint8_t p1, uint8_t p2) {
 
 static command_t configuration_command(void) {
     // Pin the public wire opcode independently of the dispatcher's enum.
-    command_t cmd = {.cla = CLA, .ins = 0x0D};
+    command_t cmd = {.cla = CLA, .ins = 0x0E};
     return cmd;
 }
 
