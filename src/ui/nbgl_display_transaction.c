@@ -37,10 +37,13 @@
 #include "menu.h"
 #include "address.h"
 
-static char g_from_address[1 + ADDRESS_SIZE * 2 + 1];
+// "Q", the address in hex and a NUL.
+#define ADDRESS_TEXT_SIZE (1 + ADDRESS_SIZE * 2 + 1)
+
+static char g_from_address[ADDRESS_TEXT_SIZE];
 static char g_amount[TX_FORMAT_MAX_AMOUNT_LEN + TOKEN_SYMBOL_MAX + 2];
-static char g_to_address[1 + ADDRESS_SIZE * 2 + 1];
-static char g_token_contract[1 + ADDRESS_SIZE * 2 + 1];
+static char g_to_address[ADDRESS_TEXT_SIZE];
+static char g_token_contract[ADDRESS_TEXT_SIZE];
 static char g_max_fees[TX_FORMAT_MAX_AMOUNT_LEN + 5];
 static char g_chain_id[TX_FORMAT_MAX_DECIMAL_DIGITS + 1];
 static char g_nonce[21];
@@ -132,7 +135,7 @@ void print_tx_utils(zond_tx_t *tx) {
 
 // Public function to start the transaction review
 // - Check if the app is in the right state for transaction review
-// - Format the amount and address strings in g_amount and g_address buffers
+// - Format the amount and address strings in g_amount and g_to_address
 // - Display the first screen of the transaction review
 // - Display a warning if the transaction is blind-signed
 int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
@@ -184,7 +187,7 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
     snprintf(g_amount,
              sizeof(g_amount),
              "%s %s",
-             token->enabled ? metadata->symbol : "QRL",
+             token->enabled ? metadata->symbol : TOKEN_NATIVE_TICKER,
              amount);
 
     // An empty recipient creates a contract; it is not the zero address.
@@ -241,7 +244,12 @@ int ui_display_transaction_bs_choice(bool is_blind_signed, zond_tx_t *tx) {
         ADD_PAIR("To", g_to_address);
     }
     if (token->enabled) {
+#ifdef SCREEN_SIZE_WALLET
         ADD_PAIR("Token contract", g_token_contract);
+#else
+        // Nano cuts the middle out of the longer title once a page counter is added.
+        ADD_PAIR("Contract", g_token_contract);
+#endif
     }
     ADD_PAIR("Chain ID", g_chain_id);
     ADD_PAIR("Gas limit", g_gas_limit);

@@ -242,7 +242,8 @@ Only `transfer(address,uint256)` is decoded in this version:
 
 The screen shows the sending account, token amount/symbol, actual token
 recipient, token contract, Chain ID, and maximum fees in QRL, plus optional nonce
-and transaction hash. The signature covers the original complete transaction,
+and transaction hash. The token contract row is titled `Token contract`, or
+`Contract` on Nano, where the longer title does not fit. The signature covers the original complete transaction,
 including calldata. Recognition does not simulate execution or guarantee a
 successful transfer or the amount ultimately credited by a custom token.
 
