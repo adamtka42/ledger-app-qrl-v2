@@ -108,3 +108,24 @@ set_property(TARGET test_crypto_cleanup APPEND_STRING PROPERTY LINK_FLAGS
     " -Wl,--wrap=shake256_absorb,--wrap=shake256_squeeze,--wrap=poly_vec_l_uniform_eta,--wrap=poly_vec_k_uniform_eta,--wrap=poly_vec_l_chk_norm")
 target_link_libraries(test_crypto_cleanup PRIVATE cmocka gcov)
 add_test(test_crypto_cleanup test_crypto_cleanup)
+
+# Real APDU dispatch and configuration/version handlers with SDK-free I/O mocks.
+add_executable(test_app_configuration
+    test_app_configuration.c
+    ../src/apdu/dispatcher.c
+    ../src/handler/get_app_configuration.c
+    ../src/handler/get_version.c)
+target_include_directories(test_app_configuration BEFORE PRIVATE
+    mocks/configuration mocks ../src/apdu ../src/handler)
+target_compile_definitions(test_app_configuration PRIVATE
+    MAJOR_VERSION=23 MINOR_VERSION=45 PATCH_VERSION=67)
+target_link_libraries(test_app_configuration PRIVATE cmocka gcov)
+add_test(test_app_configuration test_app_configuration)
+
+find_program(APP_CONFIGURATION_TEST_PYTHON NAMES python3)
+if(NOT APP_CONFIGURATION_TEST_PYTHON)
+    message(FATAL_ERROR "Python 3 is required for application configuration client tests")
+endif()
+add_test(NAME test_app_configuration_client
+    COMMAND ${APP_CONFIGURATION_TEST_PYTHON}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_app_configuration_client.py)

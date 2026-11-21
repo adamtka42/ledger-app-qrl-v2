@@ -29,8 +29,14 @@
 #include "sw.h"
 #include "get_version.h"
 #include "get_app_name.h"
+#include "get_app_configuration.h"
 #include "get_public_key.h"
 #include "sign_tx.h"
+
+// Commands without parameters must leave P1 and P2 at zero.
+static bool p1p2_unused(const command_t *cmd) {
+    return cmd->p1 == 0 && cmd->p2 == 0;
+}
 
 int apdu_dispatcher(const command_t *cmd) {
     LEDGER_ASSERT(cmd != NULL, "NULL cmd");
@@ -43,17 +49,25 @@ int apdu_dispatcher(const command_t *cmd) {
 
     switch (cmd->ins) {
         case GET_VERSION:
-            if (cmd->p1 != 0 || cmd->p2 != 0) {
+            if (!p1p2_unused(cmd)) {
                 return io_send_sw(SW_WRONG_P1P2);
             }
 
             return handler_get_version();
         case GET_APP_NAME:
-            if (cmd->p1 != 0 || cmd->p2 != 0) {
+            if (!p1p2_unused(cmd)) {
                 return io_send_sw(SW_WRONG_P1P2);
             }
 
             return handler_get_app_name();
+        case GET_APP_CONFIGURATION:
+            if (!p1p2_unused(cmd)) {
+                return io_send_sw(SW_WRONG_P1P2);
+            }
+            if (cmd->lc != 0) {
+                return io_send_sw(SW_WRONG_DATA_LENGTH);
+            }
+            return handler_get_app_configuration();
         case GET_PUBLIC_KEY:
             // P2 = 0: Return address (with derivation path in data)
             // P2 = 1-11: Return public key chunk (P2-1 is chunk index 0-10)
