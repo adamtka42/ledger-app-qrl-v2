@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- NFT transfers and approvals are clear-signed with the collection name when the host provides issuer-signed collection metadata through the new `PROVIDE_NFT_METADATA` command (`INS 0x0C`); see `doc/TRANSACTION.md`
+- NFT transfers and approvals are clear-signed with the collection name when the host provides issuer-signed collection metadata through the new `PROVIDE_NFT_METADATA` command (`INS 0x0D`); see `doc/TRANSACTION.md`
 
 ### Changed
 
