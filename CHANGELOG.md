@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Personal messages of up to 1024 bytes of printable ASCII are signed in the QRL signed-message format through the new `SIGN_PERSONAL_MESSAGE` command (`INS 0x08`), after the account, the byte count and the complete message are reviewed on the device; see `APP_SPECIFICATION.md`
+
 ### Changed
 
 - The transaction is parsed and Keccak-hashed chunk by chunk as the SIGN_TX APDUs arrive (`src/tx_stream.c`) instead of being buffered and decoded at the end. The fixed 510-byte transaction limit is gone (only a 64 KiB sanity cap remains), so transactions with large calldata can be signed
