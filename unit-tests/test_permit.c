@@ -165,6 +165,22 @@ static void test_deadline_format(void **state) {
     memset(word, 0xff, sizeof(word));
     assert_true(permit_format_deadline(word, text, sizeof(text)));
     assert_string_equal(text, "After year 9999");
+    /* Only the uint256 maximum itself stands for a permit that never expires. */
+    memset(word, 0, 32);
+    assert_true(permit_format_deadline(word, text, sizeof(text)));
+    assert_string_equal(text, "No expiry date");
+    word[63] = 0xfe;
+    assert_true(permit_format_deadline(word, text, sizeof(text)));
+    assert_string_equal(text, "After year 9999");
+    word[63] = 0xff;
+    word[32] = 0x7f;
+    assert_true(permit_format_deadline(word, text, sizeof(text)));
+    assert_string_equal(text, "After year 9999");
+    word[32] = 0xff;
+    word[31] = 1;
+    assert_true(permit_format_deadline(word, text, sizeof(text)));
+    assert_string_equal(text, "After year 9999");
+    word[31] = 0;
     assert_false(permit_format_deadline(word, text, sizeof(text) - 1));
     assert_false(permit_format_deadline(NULL, text, sizeof(text)));
     assert_false(permit_format_deadline(word, NULL, sizeof(text)));
@@ -226,7 +242,7 @@ static void test_permit_kinds(void **state) {
     assert_true(permit_prepare(&data, &metadata));
     assert_int_equal(data.permit_kind, PERMIT_UNLIMITED);
     assert_string_equal(value(1), "TKN Unlimited");
-    assert_string_equal(value(5), "After year 9999");
+    assert_string_equal(value(5), "No expiry date");
 
     /* One unit below the maximum is an ordinary, exactly displayed limit. */
     c.value[31] = 0xfe;

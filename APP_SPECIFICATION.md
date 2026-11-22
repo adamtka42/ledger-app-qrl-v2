@@ -382,7 +382,7 @@ deadline and the permit nonce:
 | Spender | `spender` |
 | Token contract | `verifyingContract`; the row is titled `Contract` on Nano |
 | Chain ID | `chainId` |
-| Valid until | `deadline` as `YYYY-MM-DD HH:MM:SS UTC`; `After year 9999` for any later value |
+| Valid until | `deadline` as `YYYY-MM-DD HH:MM:SS UTC`; `No expiry date` for `2^256 - 1`; `After year 9999` for any other later value |
 | Permit nonce | `nonce` |
 
 A zero limit is titled as a permit revocation and the maximum as an unlimited

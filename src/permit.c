@@ -80,14 +80,21 @@ static void two_digits(char *out, unsigned value) {
 }
 
 bool permit_format_deadline(const uint8_t word[ABI_WORD_LEN], char *out, size_t size) {
-    /* Still a finite deadline, so it is not presented as an unlimited one. */
-    static const char never[] = "After year 9999";
+    /* The uint256 maximum is the conventional deadline of a permit that never
+     * expires. Any other late value is finite and is not presented as one. */
+    static const char never[] = "No expiry date";
+    static const char late[] = "After year 9999";
     /* 9999-12-31 23:59:59 UTC is 253402300799 = 0x3AFFF4417F. */
     static const uint8_t last[5] = {0x3a, 0xff, 0xf4, 0x41, 0x7f};
     if (word == NULL || out == NULL || size < PERMIT_DEADLINE_MAX_LEN) return false;
+    if (all_bytes(word, ABI_UINT256_OFFSET, 0) &&
+        all_bytes(uint256_low(word), MAX_FIELD_SIZE, 0xff)) {
+        memcpy(out, never, sizeof(never));
+        return true;
+    }
     const uint8_t *value = word + ABI_WORD_LEN - sizeof(last);
     if (!all_bytes(word, ABI_WORD_LEN - sizeof(last), 0) || memcmp(value, last, sizeof(last)) > 0) {
-        memcpy(out, never, sizeof(never));
+        memcpy(out, late, sizeof(late));
         return true;
     }
     /* Long division by one day keeps every intermediate value within 32 bits. */
