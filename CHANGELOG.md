@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Personal messages of up to 1024 bytes of printable ASCII are signed in the QRL signed-message format through the new `SIGN_PERSONAL_MESSAGE` command (`INS 0x08`), after the account, the byte count and the complete message are reviewed on the device; see `APP_SPECIFICATION.md`
+- QRL Typed Structured Data v1 is signed through the new `SIGN_TYPED_DATA` command (`INS 0x0C`). The device validates the type definitions and values, computes the hash itself and shows every field for review; see `APP_SPECIFICATION.md`
 
 ### Changed
 
