@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Token transfers (`transfer(address,uint256)`) are clear-signed with the amount, symbol and recipient when the host provides issuer-signed token metadata through the new `PROVIDE_TOKEN_METADATA` command (`INS 0x0A`). No metadata issuer is configured by default; one is set at build time with `TOKEN_METADATA_PUBLIC_KEY`; see `APP_SPECIFICATION.md`
+
 ### Changed
 
 - The transaction is parsed and Keccak-hashed chunk by chunk as the SIGN_TX APDUs arrive (`src/tx_stream.c`) instead of being buffered and decoded at the end. The fixed 510-byte transaction limit is gone (only a 64 KiB sanity cap remains), so transactions with large calldata can be signed
