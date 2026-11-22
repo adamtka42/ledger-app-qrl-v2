@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SW_WRONG_TX_LENGTH` (0xB004) is no longer emitted; oversized or malformed input fails with `SW_TX_PARSING_FAIL`
 - The whole-buffer RLP decoder (`src/mldsa87/rlp_decode.c`) and its unit test
 
+### Fixed
+
+- A SIGN_TX session becomes active only after the BIP32 path of the first block is validated, and it is discarded when the path, the transaction data or the command parameters are rejected. Continuing a discarded session returns `SW_BAD_STATE` (0xB007)
+- Signature chunks are exported only for the currently approved transaction, and only after the signature passed self-verification. An unfinished export of an earlier request no longer authorizes a new one, and the persistent export flag is cleared whenever a request is reset
+- First and continuation SIGN_TX blocks with a nonzero P2 are rejected with `SW_WRONG_P1P2`
+- A transaction with an empty `to` is reviewed as `Operation: Create contract` instead of a transfer to the zero address
+- The derived seed and the secret intermediate buffers of ML-DSA-87 signing and Keccak/SHAKE hashing are wiped after use, also when an operation fails
+
 ## [2.1.0] - 2023-10-06
 
 ### Changed
