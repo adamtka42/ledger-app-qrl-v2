@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The current settings (blind signing, nonce display, transaction hash display) and the app version can be read through the new `GET_APP_CONFIGURATION` command (`INS 0x0E`), which has no confirmation screen and changes no state; see `APP_SPECIFICATION.md`
+
 ### Changed
 
 - The transaction is parsed and Keccak-hashed chunk by chunk as the SIGN_TX APDUs arrive (`src/tx_stream.c`) instead of being buffered and decoded at the end. The fixed 510-byte transaction limit is gone (only a 64 KiB sanity cap remains), so transactions with large calldata can be signed
