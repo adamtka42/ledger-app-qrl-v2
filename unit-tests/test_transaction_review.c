@@ -89,8 +89,34 @@ void nbgl_useCaseReview(int type,
     (void) subtitle;
     (void) finish;
     assert_int_equal(type, TYPE_TRANSACTION);
-    assert_int_equal(pairs->nbPairs, 9);
+    const bool transfer_from = G_context.tx_info.token_call.kind == TOKEN_CALL_TRANSFER_FROM;
+    assert_int_equal(pairs->nbPairs, transfer_from ? 11 : 9);
     assert_non_null(pairs->pairs);
+    if (transfer_from) {
+        char expected[1 + ADDRESS_SIZE * 2 + 1];
+        const nbgl_contentTagValue_t *rows = pairs->pairs;
+        assert_string_equal(rows[0].item, "Sign with");
+        assert_true(format_checksummed_address(G_context.address, expected, sizeof(expected)));
+        assert_string_equal(rows[0].value, expected);
+        assert_string_equal(rows[1].item, "From");
+        assert_true(format_checksummed_address(G_context.tx_info.token_call.source,
+                                               expected,
+                                               sizeof(expected)));
+        assert_string_equal(rows[1].value, expected);
+        assert_string_equal(rows[2].item, "Amount");
+        assert_string_equal(rows[2].value, "TKN 10");
+        assert_string_equal(rows[3].item, "To");
+        assert_true(format_checksummed_address(G_context.tx_info.token_call.target,
+                                               expected,
+                                               sizeof(expected)));
+        assert_string_equal(rows[3].value, expected);
+        assert_string_equal(rows[4].item, "Token contract");
+        assert_true(
+            format_checksummed_address(G_context.tx_info.tx_data.to, expected, sizeof(expected)));
+        assert_string_equal(rows[4].value, expected);
+        assert_string_equal(rows[9].item, "Nonce");
+        assert_string_equal(rows[10].item, "Transaction hash");
+    }
     spinner = false;
     review_callback = choice;
     review_calls++;
@@ -325,12 +351,40 @@ static void test_rejection_status(void **state) {
     }
 }
 
+static void test_transfer_from_review(void **state) {
+    (void) state;
+    start_session(NO_FAULT, 0);
+    token_call_t *call = &G_context.tx_info.token_call;
+    call->kind = TOKEN_CALL_TRANSFER_FROM;
+    memset(call->source, 0x33, ADDRESS_SIZE);
+    memset(call->target, 0x44, ADDRESS_SIZE);
+    // 10 tokens with six decimals.
+    call->amount[29] = 0x98;
+    call->amount[30] = 0x96;
+    call->amount[31] = 0x80;
+    memcpy(G_context.tx_info.token_metadata.symbol, "TKN", 4);
+    G_context.tx_info.token_metadata.decimals = 6;
+    ui_display_transaction_bs_choice(false, &G_context.tx_info.tx_data);
+    assert_int_equal(review_calls, 1);
+    assert_int_equal(menu_calls, 0);
+    assert_int_equal(nvm_writes, 0);
+
+    // The additional owner formatting path must discard the session on failure.
+    start_session(ADDRESS_FAIL, 2);
+    G_context.tx_info.token_call.kind = TOKEN_CALL_TRANSFER_FROM;
+    ui_display_transaction_bs_choice(false, &G_context.tx_info.tx_data);
+    assert_discarded(SW_DISPLAY_ADDRESS_FAIL);
+    assert_int_equal(menu_calls, 1);
+    assert_int_equal(review_calls, 0);
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_preparation_failure_returns_home),
         cmocka_unit_test(test_invalid_review_state_returns_home),
         cmocka_unit_test(test_review_status_matches_signature_result),
         cmocka_unit_test(test_rejection_status),
+        cmocka_unit_test(test_transfer_from_review),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

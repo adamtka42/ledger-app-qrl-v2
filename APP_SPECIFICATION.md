@@ -189,8 +189,9 @@ It must be sent **after** `SIGN_TX/DATA_FIRST` and **before** any transaction by
 
 Issuers must attest only fungible SQRCTF1-compatible contracts on the specified
 network. This payload has no token-standard discriminator: ERC-721 uses the same
-`approve(address,uint256)` selector (`095ea7b3`), but the integer is a token ID,
-not a spending limit. The device cannot distinguish these semantics from
+`approve(address,uint256)` selector (`095ea7b3`) and
+`transferFrom(address,address,uint256)` selector (`23b872dd`), but their integer
+is a token ID, not a spending limit or fungible amount. The device cannot distinguish these semantics from
 calldata alone; issuers must not sign these descriptors for NFT contracts.
 
 The issuer signs `SHA256(ASCII("QRL-TOKEN-METADATA-V1") || body)`, where `body`
@@ -220,9 +221,15 @@ versioned extension of this format and its verification implementation.
 For emulator tests only:
 
 ```sh
+make clean_target
 make DEBUG=1 TOKEN_METADATA_TEST_KEY=1
 pytest --device nanosp --token-metadata-test-key tests/test_token_transfer_cmd.py
 ```
+
+Use the same `BOLOS_SDK` for cleaning and building. Clean the selected target
+when changing issuer build flags: the SDK does not track command-line flag
+changes as object-file dependencies. The pytest option checks that the test
+issuer is available; it does not configure the firmware's issuer key.
 
 The test issuer uses the publicly known P-256 scalar `1`, requires `DEBUG=1`, and
 displays `TEST token transfer` during review. The same key is rejected when
@@ -234,13 +241,16 @@ claim that a real token has been approved or deployed on a particular network.
 
 #### Supported clear-signed calls
 
-`transfer(address,uint256)` and `approve(address,uint256)` are decoded:
+`transfer(address,uint256)`, `approve(address,uint256)` and
+`transferFrom(address,address,uint256)` are decoded:
 
-- Selector: `a9059cbb` for transfer, `095ea7b3` for approve (4 bytes).
+- Selector: `a9059cbb` for transfer, `095ea7b3` for approve, `23b872dd` for transferFrom (4 bytes).
 - Recipient or spender: one 64-byte QRVM ABI word; approve requires a nonzero spender.
+- `transferFrom` has two address words: token owner first, then token recipient.
 - Amount: one 64-byte word, with the upper 32 bytes zero (`uint256`).
-- Exact calldata length: 132 bytes; no additional bytes. The RLP parser retains
-  the first 256 calldata bytes for operation decoders and records the full length;
+- Exact calldata length: 132 bytes for transfer/approve, 196 bytes for transferFrom;
+  no additional bytes. The RLP parser retains the first 256 calldata bytes for
+  operation decoders and records the full length;
   larger payloads continue to be streamed and hashed. This storage limit does not
   broaden the supported clear-signing profile.
 - Token contract and full Chain ID must match the verified descriptor.
@@ -253,6 +263,15 @@ and transaction hash. The token contract row is titled `Token contract`, or
 including calldata. Recognition does not simulate execution or guarantee a
 successful transfer or the amount ultimately credited by a custom token.
 
+`transferFrom` shows `Sign with` (the account signing the transaction and paying
+native gas), `From` (the token owner encoded in calldata), `Amount`, `To`, token
+contract, Chain ID and fees, plus optional nonce and transaction hash. Both
+account rows are shown even when the owner is the signer. The integer is always
+a literal transfer amount, including zero and `2^256 - 1`; it never means an
+unlimited allowance. This is not a new approval: execution may require an
+existing allowance for the signing account, according to the token contract.
+The device does not query balances, allowances or execution results.
+
 Approvals have a separate review: Owner, Spending limit, Spender, Token contract,
 Chain ID and QRL fees, plus optional nonce and transaction hash. A zero limit
 is presented as revocation in the review. Exactly `2^256 - 1` is displayed as
@@ -264,16 +283,17 @@ nor guarantees execution. Issuers must only attest fungible SQRCTF1-compatible
 contracts; the approve selector alone also exists in other token standards.
 
 Zero-address policy: token transfers retain the existing literal-recipient review,
-including a zero recipient, to preserve transfer compatibility. This is not a
-claim that the call succeeds, and the review does not infer a burn: standard
-SQRCTF1 contracts revert such transfers. Approvals use a stricter supported profile
+including a zero recipient, to preserve transfer compatibility. `transferFrom`
+likewise displays zero owner/recipient addresses literally; it does not infer
+a mint or burn from them. This does not claim that the call succeeds: standard
+SQRCTF1 contracts revert transfers involving zero addresses. Approvals use a stricter supported profile
 and require a nonzero spender; a zero spender is not a revoke-all instruction.
 Revocation is `approve(nonzero_spender, 0)`. This approval feature does not
 change the established transfer policy or simulate contract execution.
 
 Other calls, mismatching descriptors, noncanonical token arguments, native
 value, or nonempty access lists follow the existing blind-signing policy; with
-blind signing disabled they are rejected. `transferFrom`, NFT calls,
+blind signing disabled they are rejected. NFT calls,
 routers, and general ABI decoding are outside this version's supported profile.
 
 Descriptors exist only in RAM for one signing session. `DATA_FIRST`, address
@@ -292,7 +312,17 @@ tests/venv/bin/python examples/token_call.py --test-key --operation approve --un
 ```
 
 Use `--url` for the emulator API endpoint and `--spender Q...` to change the
-authorized spender. The metadata APDU and session ordering remain unchanged.
+authorized spender. To review a transfer from a synthetic token owner:
+
+```sh
+TOKEN_OWNER="Q$(python3 -c 'print("33" * 64)')"
+tests/venv/bin/python examples/token_call.py --test-key --operation transferFrom \
+  --owner "$TOKEN_OWNER" --units 10000000 --url http://127.0.0.1:5003
+```
+
+The metadata APDU and session ordering remain unchanged. This example is a UI
+and signature test, with no blockchain connection; it does not create an
+allowance or send tokens on a network.
 
 ## Status Words
 

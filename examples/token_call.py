@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sign a QRL token transfer or approval in Speculos; never connects to a node.
+"""Sign a QRL token transfer, transferFrom or approval in Speculos; no node connection.
 
 Run with the Python environment from tests/requirements.txt. The --test-key
 option requires an app built with DEBUG=1 TOKEN_METADATA_TEST_KEY=1.
@@ -17,6 +17,7 @@ from dilithium_py.ml_dsa import ML_DSA_87
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 from application_client.token_metadata import DOMAIN, metadata_body, transfer_calldata, approval_calldata
+from application_client.token_metadata import transfer_from_calldata
 
 from application_client.transaction import build_transaction_preimage
 
@@ -37,8 +38,9 @@ def main():
     parser.add_argument("--chain-id", type=int, default=1)
     parser.add_argument("--nonce", type=int, default=0)
     parser.add_argument("--contract", default="Q" + "22" * 64)
-    parser.add_argument("--operation", choices=("transfer", "approve"), default="transfer")
-    parser.add_argument("--recipient", help="Token recipient, for transfer only")
+    parser.add_argument("--operation", choices=("transfer", "transferFrom", "approve"), default="transfer")
+    parser.add_argument("--recipient", help="Token recipient, for transfer or transferFrom")
+    parser.add_argument("--owner", help="Token owner's QRL address; required for transferFrom")
     parser.add_argument("--spender", help="Authorized spender, for approve only")
     parser.add_argument("--symbol", default="TKN")
     parser.add_argument("--decimals", type=int, default=6)
@@ -47,14 +49,21 @@ def main():
     limit.add_argument("--unlimited", action="store_true", help="Approve the maximum uint256 allowance")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    if args.operation == "transfer" and (args.spender is not None or args.unlimited):
+    if args.operation != "approve" and (args.spender is not None or args.unlimited):
         parser.error("--spender and --unlimited require --operation approve")
     if args.operation == "approve" and args.recipient is not None:
         parser.error("Use --spender for approvals")
+    if args.operation == "transferFrom" and args.owner is None:
+        parser.error("--operation transferFrom requires --owner")
+    if args.operation != "transferFrom" and args.owner is not None:
+        parser.error("--owner requires --operation transferFrom")
     target_text = (args.spender if args.operation == "approve" else args.recipient) or "Q" + "11" * 64
     contract, target = address(args.contract), address(target_text)
     units = 2**256 - 1 if args.unlimited else args.units
-    calldata = (approval_calldata if args.operation == "approve" else transfer_calldata)(units, target)
+    if args.operation == "transferFrom":
+        calldata = transfer_from_calldata(units, address(args.owner), target)
+    else:
+        calldata = (approval_calldata if args.operation == "approve" else transfer_calldata)(units, target)
     body = metadata_body(args.chain_id, contract, args.symbol, args.decimals)
     key = ECC.construct(curve="P-256", d=1) if args.test_key else ECC.import_key(args.issuer_key.read_bytes())
     signature = DSS.new(key, "deterministic-rfc6979", encoding="der").sign(SHA256.new(DOMAIN + body))
@@ -65,6 +74,9 @@ def main():
     print(f"Operation: {args.operation}; token: {args.symbol}; raw units: {units}; decimals: {args.decimals}")
     target_label = "Spender" if args.operation == "approve" else "Recipient"
     print(f"Contract: {args.contract}\n{target_label}: {target_text}\nChain ID: {args.chain_id}")
+    if args.operation == "transferFrom":
+        print(f"Token owner (From): {args.owner}")
+        print("Sign with is the device account, which pays gas. Existing allowance is not checked here.")
     if args.operation == "approve" and units == 2**256 - 1:
         print("Unlimited approval: the spender may spend all current and future tokens until revoked.")
     if args.dry_run:

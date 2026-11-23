@@ -5,7 +5,7 @@
 #include "call_checks.h"
 #include "signed_payload.h"
 
-_Static_assert(TOKEN_CALL_CALLDATA_LEN <= TX_CALLDATA_MAX_LEN,
+_Static_assert(TOKEN_CALL_TRANSFER_FROM_CALLDATA_LEN <= TX_CALLDATA_MAX_LEN,
                "token calldata must fit in the retained transaction prefix");
 
 /* Case-insensitive match against the native ticker, without ctype. */
@@ -64,33 +64,52 @@ static bool metadata_matches_tx(const token_metadata_t *metadata, const zond_tx_
            memcmp(tx->to, metadata->contract, ADDRESS_LENGTH) == 0;
 }
 
+/* The calls token metadata can clear-sign. The amount is the word after the
+ * target and ends the calldata. */
+typedef struct {
+    uint8_t selector[ABI_SELECTOR_LEN];
+    token_call_kind_e kind;
+    uint8_t target_arg;
+} token_profile_t;
+
+static const token_profile_t PROFILES[] = {
+    {{0xa9, 0x05, 0x9c, 0xbb}, TOKEN_CALL_TRANSFER, 0},
+    {{0x09, 0x5e, 0xa7, 0xb3}, TOKEN_CALL_APPROVE, 0},
+    // The same selector is used by ERC-721. Only issuer-authenticated fungible-token
+    // metadata permits interpreting the last word as an amount.
+    {{0x23, 0xb8, 0x72, 0xdd}, TOKEN_CALL_TRANSFER_FROM, 1},
+};
+
+static const token_profile_t *find_profile(const uint8_t *calldata) {
+    for (size_t i = 0; i < sizeof(PROFILES) / sizeof(PROFILES[0]); i++) {
+        if (memcmp(calldata, PROFILES[i].selector, ABI_SELECTOR_LEN) == 0) return &PROFILES[i];
+    }
+    return NULL;
+}
+
 bool token_call_prepare(const zond_tx_t *tx, const token_metadata_t *metadata, token_call_t *out) {
-    static const uint8_t transfer_selector[ABI_SELECTOR_LEN] = {0xa9, 0x05, 0x9c, 0xbb};
-    static const uint8_t approve_selector[ABI_SELECTOR_LEN] = {0x09, 0x5e, 0xa7, 0xb3};
     if (out == NULL) return false;
     memset(out, 0, sizeof(*out));
     if (tx == NULL || metadata == NULL) return false;
-    if (!tx_is_plain_call(tx) || tx->data_len != TOKEN_CALL_CALLDATA_LEN) return false;
-    if (!metadata_matches_tx(metadata, tx)) return false;
+    if (!tx_is_plain_call(tx) || !metadata_matches_tx(metadata, tx)) return false;
 
-    token_call_kind_e kind;
-    if (memcmp(tx->data, transfer_selector, sizeof(transfer_selector)) == 0) {
-        kind = TOKEN_CALL_TRANSFER;
-    } else if (memcmp(tx->data, approve_selector, sizeof(approve_selector)) == 0) {
-        // A zero spender is outside the approval profile; it never means "revoke all".
-        // Transfer recipients retain the existing literal-address display policy.
-        if (all_zero(abi_arg(tx->data, 0), ADDRESS_LENGTH)) return false;
-        kind = TOKEN_CALL_APPROVE;
-    } else {
+    const token_profile_t *profile = find_profile(tx->data);
+    if (profile == NULL) return false;
+    // A zero spender is outside the approval profile; it never means "revoke all".
+    // Transfer recipients retain the existing literal-address display policy.
+    if (profile->kind == TOKEN_CALL_APPROVE && all_zero(abi_arg(tx->data, 0), ADDRESS_LENGTH))
         return false;
-    }
-
+    const size_t amount_arg = profile->target_arg + 1u;
+    if (tx->data_len != ABI_CALLDATA_LEN(amount_arg + 1u)) return false;
     /* The amount is a uint256, so the upper half of its word must be zero. */
-    const uint8_t *amount = abi_arg(tx->data, 1);
+    const uint8_t *amount = abi_arg(tx->data, amount_arg);
     if (!all_zero(amount, ABI_UINT256_OFFSET)) return false;
-    memcpy(out->target, abi_arg(tx->data, 0), ADDRESS_LENGTH);
+
+    if (profile->kind == TOKEN_CALL_TRANSFER_FROM)
+        memcpy(out->source, abi_arg(tx->data, 0), ADDRESS_LENGTH);
+    memcpy(out->target, abi_arg(tx->data, profile->target_arg), ADDRESS_LENGTH);
     memcpy(out->amount, amount + ABI_UINT256_OFFSET, MAX_FIELD_SIZE);
-    out->kind = kind;
+    out->kind = profile->kind;
     return true;
 }
 

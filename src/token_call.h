@@ -3,7 +3,8 @@
 #include "qrvm_abi.h"
 #include "tx_types.h"
 
-#define TOKEN_CALL_CALLDATA_LEN ABI_CALLDATA_LEN(2)
+#define TOKEN_CALL_CALLDATA_LEN               ABI_CALLDATA_LEN(2)
+#define TOKEN_CALL_TRANSFER_FROM_CALLDATA_LEN ABI_CALLDATA_LEN(3)
 
 #define TOKEN_SYMBOL_MAX      12
 #define TOKEN_NATIVE_TICKER   "QRL" /* reserved: a token may never display as QRL */
@@ -29,10 +30,12 @@ typedef enum {
     TOKEN_CALL_NONE = 0,
     TOKEN_CALL_TRANSFER,
     TOKEN_CALL_APPROVE,
+    TOKEN_CALL_TRANSFER_FROM,
 } token_call_kind_e;
 
 typedef struct {
-    uint8_t target[ADDRESS_LENGTH];  // recipient for transfer, spender for approve
+    uint8_t target[ADDRESS_LENGTH];  // recipient for transfers, spender for approve
+    uint8_t source[ADDRESS_LENGTH];  // token owner, only for transferFrom
     uint8_t amount[MAX_FIELD_SIZE];
     token_call_kind_e kind;
 } token_call_t;

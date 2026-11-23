@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Token transfers (`transfer(address,uint256)`) are clear-signed with the amount, symbol and recipient when the host provides issuer-signed token metadata through the new `PROVIDE_TOKEN_METADATA` command (`INS 0x0A`). No metadata issuer is configured by default; one is set at build time with `TOKEN_METADATA_PUBLIC_KEY`; see `APP_SPECIFICATION.md`
 - Token spending approvals (`approve(address,uint256)`) are clear-signed with the spending limit and the spender, using the same issuer-signed token metadata. A zero limit is reviewed as a revocation and the maximum limit as `Unlimited` with an extra confirmation; see `APP_SPECIFICATION.md`
+- Fungible token `transferFrom(address,address,uint256)` is clear-signed with the signing account, token owner, recipient and formatted amount, using authenticated token metadata.
 
 ### Changed
 
